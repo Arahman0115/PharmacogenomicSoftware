@@ -35,10 +35,11 @@ class TransactionsTab(QWidget):
 
         try:
             query = """
-                SELECT release_time, medication_id, amount, payment_method, status
-                FROM FinishedTransactions
-                WHERE user_id = %s
-                ORDER BY release_time DESC
+                SELECT f.release_time, m.medication_name, m.strength, f.amount, f.payment_method, f.status
+                FROM FinishedTransactions f
+                JOIN medications m on f.medication_id = m.medication_id
+                WHERE f.user_id = %s
+                ORDER BY f.release_time DESC
                 LIMIT 100
             """
             self.db_connection.cursor.execute(query, (self.user_id,))
@@ -47,7 +48,7 @@ class TransactionsTab(QWidget):
             self.table.setRowCount(len(transactions))
             for row, trans in enumerate(transactions):
                 self.table.setItem(row, 0, QTableWidgetItem(str(trans.get('release_time', ''))))
-                self.table.setItem(row, 1, QTableWidgetItem(str(trans.get('medication_id', ''))))
+                self.table.setItem(row, 1, QTableWidgetItem(f"{trans.get('medication_name', ' ')} {trans.get('strength', '')}"))
                 self.table.setItem(row, 2, QTableWidgetItem(str(trans.get('amount', ''))))
                 self.table.setItem(row, 3, QTableWidgetItem(trans.get('payment_method', '')))
                 self.table.setItem(row, 4, QTableWidgetItem(trans.get('status', '')))

@@ -1,9 +1,10 @@
 from PyQt6.QtWidgets import (
-    QVBoxLayout, QHBoxLayout, QLabel, QComboBox, QPushButton, QMessageBox
+    QVBoxLayout, QHBoxLayout, QLabel, QComboBox, QPushButton, QMessageBox, QLineEdit
 )
 from datetime import datetime
 from .base_queue_view import BaseQueueView
 from ui.views.audit_log_dialog import log_transition
+from .allscripts_ready_for_pt import AllScriptsReadyForPtView
 
 
 class ReleaseQueueView(BaseQueueView):
@@ -21,18 +22,28 @@ class ReleaseQueueView(BaseQueueView):
     ]
 
     def __init__(self, db_connection, parent=None):
+        self.patient_name_filter = None
         self.payment_filter = None
         super().__init__(db_connection, parent)
 
     def create_filters(self, parent_layout):
         """Create filters for release queue"""
         row1_layout = QHBoxLayout()
-        row1_layout.addWidget(QLabel("Payment Status:"))
-        self.payment_filter = QComboBox()
-        self.payment_filter.addItems(["All", "Paid", "Pending", "Insurance"])
-        row1_layout.addWidget(self.payment_filter)
+        row1_layout.addWidget(QLabel("Patient Name:"))
+        self.patient_name_filter = QLineEdit()
+        self.patient_name_filter.setPlaceholderText("Search by patient name...")
+        self.patient_name_filter.setMinimumWidth(300)
+        row1_layout.addWidget(self.patient_name_filter)
         row1_layout.addStretch()
         parent_layout.addLayout(row1_layout)
+
+        row2_layout = QHBoxLayout()
+        row2_layout.addWidget(QLabel("Payment Status:"))
+        self.payment_filter = QComboBox()
+        self.payment_filter.addItems(["All", "Paid", "Pending", "Insurance"])
+        row2_layout.addWidget(self.payment_filter)
+        row2_layout.addStretch()
+        parent_layout.addLayout(row2_layout)
 
         button_layout = QHBoxLayout()
         button_layout.addStretch()
@@ -55,7 +66,26 @@ class ReleaseQueueView(BaseQueueView):
             return
 
         try:
-            query = """
+            # Build WHERE clause based on filters
+            where_clauses = []
+            params = []
+
+            # Patient name filter
+            patient_name = self.patient_name_filter.text().strip() if self.patient_name_filter else ""
+            if patient_name:
+                where_clauses.append(
+                    "CONCAT(pt.first_name, ' ', pt.last_name) LIKE %s"
+                )
+                params.append(f"%{patient_name}%")
+
+            # Payment status filter
+            if self.payment_filter and self.payment_filter.currentText() != "All":
+                where_clauses.append("r.payment_status = %s")
+                params.append(self.payment_filter.currentText())
+
+            where_clause = " AND ".join(where_clauses) if where_clauses else "1=1"
+
+            query = f"""
                 SELECT
                     r.id as rx_id,
                     r.rx_store_num,
@@ -69,16 +99,24 @@ class ReleaseQueueView(BaseQueueView):
                 FROM ReadyForPickUp r
                 JOIN patientsinfo pt ON r.user_id = pt.user_id
                 LEFT JOIN medications m ON r.medication_id = m.medication_id
+                WHERE {where_clause}
                 ORDER BY r.ready_date ASC
                 LIMIT %s OFFSET %s
             """
 
             offset = self.get_offset()
-            self.db_connection.cursor.execute(query, (self.page_size, offset))
+            params.extend([self.page_size, offset])
+            self.db_connection.cursor.execute(query, params)
             rows = self.db_connection.cursor.fetchall()
 
-            # Get total count
-            self.db_connection.cursor.execute("SELECT COUNT(*) as count FROM ReadyForPickUp")
+            # Get total count with filters applied
+            count_query = f"""
+                SELECT COUNT(*) as count FROM ReadyForPickUp r
+                JOIN patientsinfo pt ON r.user_id = pt.user_id
+                WHERE {where_clause}
+            """
+            count_params = params[:-2]  # Remove LIMIT params
+            self.db_connection.cursor.execute(count_query, count_params)
             count_result = self.db_connection.cursor.fetchone()
             self.total_records = count_result.get('count', 0)
 
@@ -95,17 +133,24 @@ class ReleaseQueueView(BaseQueueView):
 
     def reset_filters(self):
         """Reset all filters"""
+        self.patient_name_filter.clear()
         self.payment_filter.setCurrentIndex(0)
         self.current_page = 0
         self.load_data()
 
     def on_row_double_clicked(self, item):
-        """Handle patient release/payment"""
+        """Show all prescriptions for patient with release option"""
         row = item.row()
         row_data = self.table.item(row, 0).data(256)
 
         if row_data:
-            self.release_prescription(row_data)
+            # Open the all scripts view as a modal dialog
+            dialog = AllScriptsReadyForPtView(
+                self.db_connection,
+                row_data,
+                parent=self
+            )
+            dialog.exec()
 
     def release_prescription(self, prescription_data):
         """Release prescription to patient"""

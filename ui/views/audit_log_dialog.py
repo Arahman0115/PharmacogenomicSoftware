@@ -29,6 +29,29 @@ def ensure_audit_table(db_connection):
         print(f"Warning: Could not create audit table: {e}")
 
 
+def ensure_rx_number_column(db_connection):
+    """Add rx_number column to ActivatedPrescriptions if it doesn't exist"""
+    try:
+        cursor = db_connection.cursor
+        # Check if column exists
+        cursor.execute("""
+            SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+            WHERE TABLE_NAME = 'ActivatedPrescriptions' AND COLUMN_NAME = 'rx_number'
+        """)
+        result = cursor.fetchone()
+
+        if not result:
+            # Column doesn't exist, add it
+            cursor.execute("""
+                ALTER TABLE ActivatedPrescriptions
+                ADD COLUMN rx_number VARCHAR(20) UNIQUE
+            """)
+            db_connection.connection.commit()
+            print("Added rx_number column to ActivatedPrescriptions")
+    except Exception as e:
+        print(f"Warning: Could not add rx_number column: {e}")
+
+
 def log_transition(db_connection, prescription_id, from_status, to_status, action, performed_by="pharmacist", notes=None):
     """Log a prescription status transition for audit trail"""
     try:

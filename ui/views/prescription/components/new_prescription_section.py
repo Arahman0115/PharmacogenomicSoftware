@@ -20,6 +20,7 @@ class NewPrescriptionSection(QWidget):
         self.selected_medication_id = None
         self.selected_prescriber_id = None
         self.selected_medication_name = None
+        self.selected_medication_strength = None
         self.rx_image_path = None
         self.init_ui()
 
@@ -78,7 +79,7 @@ class NewPrescriptionSection(QWidget):
         med_layout.addWidget(self.medication_search_btn)
         group_layout.addLayout(med_layout)
 
-        # Quantity
+        # Quantity (written quantity on prescription)
         qty_layout = QHBoxLayout()
         qty_layout.addWidget(QLabel("Quantity:"))
         self.quantity_spin = QDoubleSpinBox()
@@ -86,6 +87,13 @@ class NewPrescriptionSection(QWidget):
         self.quantity_spin.setMaximum(9999)
         self.quantity_spin.setValue(30)
         qty_layout.addWidget(self.quantity_spin)
+
+        qty_layout.addWidget(QLabel("Refills:"))
+        self.refills_spin = QDoubleSpinBox()
+        self.refills_spin.setMinimum(0)
+        self.refills_spin.setMaximum(999)
+        self.refills_spin.setValue(0)
+        qty_layout.addWidget(self.refills_spin)
         qty_layout.addStretch()
         group_layout.addLayout(qty_layout)
 
@@ -153,7 +161,12 @@ class NewPrescriptionSection(QWidget):
         if dialog.exec() == QDialog.DialogCode.Accepted:
             self.selected_medication_id = dialog.selected_medication_id
             self.selected_medication_name = dialog.selected_medication_name
-            self.medication_edit.setText(self.selected_medication_name)
+            self.selected_medication_strength = dialog.selected_medication_strength
+            # Display medication name and strength
+            display_text = self.selected_medication_name
+            if self.selected_medication_strength:
+                display_text = f"{self.selected_medication_name} - {self.selected_medication_strength}"
+            self.medication_edit.setText(display_text)
 
     def search_prescribers(self):
         """Open prescriber search dialog"""
@@ -183,6 +196,7 @@ class NewPrescriptionSection(QWidget):
             'medication_id': self.selected_medication_id,
             'medication_name': self.selected_medication_name,
             'quantity': int(self.quantity_spin.value()),
+            'refills': int(self.refills_spin.value()),
             'instructions': self.instructions_edit.text(),
             'prescriber_id': self.selected_prescriber_id,
             'rx_image_path': self.rx_image_path
@@ -194,9 +208,11 @@ class NewPrescriptionSection(QWidget):
         self.rx_image_path_edit.clear()
         self.medication_edit.clear()
         self.quantity_spin.setValue(30)
+        self.refills_spin.setValue(0)
         self.instructions_edit.clear()
         self.prescriber_edit.clear()
         self.selected_medication_id = None
+        self.selected_medication_strength = None
         self.selected_prescriber_id = None
         self.rx_image_path = None
 
@@ -308,8 +324,9 @@ class MedicationSearchDialog(QDialog):
         self.db_connection = db_connection
         self.selected_medication_id = None
         self.selected_medication_name = None
+        self.selected_medication_strength = None
         self.setWindowTitle("Search Medication")
-        self.setGeometry(100, 100, 800, 500)
+        self.setGeometry(100, 100, 900, 500)
         self.init_ui()
 
     def init_ui(self):
@@ -326,8 +343,8 @@ class MedicationSearchDialog(QDialog):
 
         # Results table
         self.results_table = QTableWidget()
-        self.results_table.setColumnCount(4)
-        self.results_table.setHorizontalHeaderLabels(["Medication Name", "Bottles Available", "Medication ID", ""])
+        self.results_table.setColumnCount(5)
+        self.results_table.setHorizontalHeaderLabels(["Medication Name", "Strength", "Bottles Available", "Medication ID", ""])
 
         # Set column widths
         header = self.results_table.horizontalHeader()
@@ -369,14 +386,14 @@ class MedicationSearchDialog(QDialog):
             return
 
         try:
-            # Search medications with inventory count
+            # Search medications with inventory count and strength
             query = """
-                SELECT DISTINCT m.medication_id, m.medication_name, COUNT(b.bottle_id) as bottles_available
+                SELECT DISTINCT m.medication_id, m.medication_name, m.strength, COUNT(b.bottle_id) as bottles_available
                 FROM medications m
                 LEFT JOIN bottles b ON m.medication_id = b.medication_id AND b.status = 'in_stock'
                 WHERE m.medication_name LIKE %s
-                GROUP BY m.medication_id, m.medication_name
-                ORDER BY m.medication_name ASC
+                GROUP BY m.medication_id, m.medication_name, m.strength
+                ORDER BY m.medication_name ASC, m.strength ASC
                 LIMIT 50
             """
             self.db_connection.cursor.execute(query, (f"%{med_name}%",))
@@ -396,6 +413,11 @@ class MedicationSearchDialog(QDialog):
                 name_item = QTableWidgetItem(med['medication_name'])
                 self.results_table.setItem(row, 0, name_item)
 
+                # Strength
+                strength = med['strength'] if med['strength'] else 'N/A'
+                strength_item = QTableWidgetItem(strength)
+                self.results_table.setItem(row, 1, strength_item)
+
                 # Inventory count with color coding
                 stock = med['bottles_available'] if med['bottles_available'] else 0
                 stock_item = QTableWidgetItem(f"{stock} available")
@@ -405,11 +427,11 @@ class MedicationSearchDialog(QDialog):
                     stock_item.setBackground(QColor(220, 180, 60))   # Yellow for low stock
                 else:
                     stock_item.setBackground(QColor(100, 180, 100))  # Green for in stock
-                self.results_table.setItem(row, 1, stock_item)
+                self.results_table.setItem(row, 2, stock_item)
 
                 # Medication ID
                 id_item = QTableWidgetItem(str(med['medication_id']))
-                self.results_table.setItem(row, 2, id_item)
+                self.results_table.setItem(row, 3, id_item)
 
                 # Store full medication data
                 self.results_table.item(row, 0).setData(256, med)
@@ -436,6 +458,7 @@ class MedicationSearchDialog(QDialog):
 
         self.selected_medication_id = med['medication_id']
         self.selected_medication_name = med['medication_name']
+        self.selected_medication_strength = med['strength'] if med.get('strength') else None
         self.accept()
 
 
