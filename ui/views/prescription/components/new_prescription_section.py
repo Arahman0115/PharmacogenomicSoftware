@@ -1,14 +1,14 @@
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGroupBox, QLabel, QLineEdit,
     QPushButton, QDialog, QListWidget, QListWidgetItem, QMessageBox,
-    QFileDialog, QDoubleSpinBox
+    QFileDialog, QDoubleSpinBox, QGridLayout
 )
 from PyQt6.QtCore import pyqtSignal, Qt
 from PyQt6.QtGui import QColor
 
 
 class NewPrescriptionSection(QWidget):
-    """New prescription entry section with patient, medication, and prescriber selection"""
+    """New prescription entry section with medication and prescriber selection"""
 
     prescription_ready = pyqtSignal(dict)  # Emits prescription data when ready
 
@@ -29,17 +29,29 @@ class NewPrescriptionSection(QWidget):
         group = QGroupBox("New Prescription")
         group_layout = QVBoxLayout(group)
 
-        # Patient selection
-        patient_layout = QHBoxLayout()
-        patient_layout.addWidget(QLabel("Patient:"))
-        self.patient_edit = QLineEdit()
-        self.patient_edit.setReadOnly(True)
-        patient_layout.addWidget(self.patient_edit)
-        self.patient_search_btn = QPushButton("Search Patient")
-        self.patient_search_btn.setProperty("cssClass", "primary")
-        self.patient_search_btn.clicked.connect(self.search_patient)
-        patient_layout.addWidget(self.patient_search_btn)
-        group_layout.addLayout(patient_layout)
+        # Patient info display (read-only - set by CreateOrderView)
+        patient_info_layout = QGridLayout()
+        patient_info_layout.addWidget(QLabel("Patient:"), 0, 0)
+        self.patient_display = QLineEdit()
+        self.patient_display.setReadOnly(True)
+        patient_info_layout.addWidget(self.patient_display, 0, 1)
+
+        patient_info_layout.addWidget(QLabel("Phone:"), 1, 0)
+        self.patient_phone_display = QLineEdit()
+        self.patient_phone_display.setReadOnly(True)
+        patient_info_layout.addWidget(self.patient_phone_display, 1, 1)
+
+        patient_info_layout.addWidget(QLabel("Address:"), 2, 0)
+        self.patient_address_display = QLineEdit()
+        self.patient_address_display.setReadOnly(True)
+        patient_info_layout.addWidget(self.patient_address_display, 2, 1)
+
+        patient_info_layout.addWidget(QLabel("DOB:"), 3, 0)
+        self.patient_dob_display = QLineEdit()
+        self.patient_dob_display.setReadOnly(True)
+        patient_info_layout.addWidget(self.patient_dob_display, 3, 1)
+
+        group_layout.addLayout(patient_info_layout)
 
         # Rx Image
         image_layout = QHBoxLayout()
@@ -99,13 +111,26 @@ class NewPrescriptionSection(QWidget):
         layout.addWidget(group)
         layout.addStretch()
 
-    def search_patient(self):
-        """Open patient search dialog"""
-        dialog = PatientSearchDialog(self.db_connection, self)
-        if dialog.exec() == QDialog.DialogCode.Accepted:
-            self.selected_patient_id = dialog.selected_patient_id
-            patient_name = dialog.selected_patient_name
-            self.patient_edit.setText(patient_name)
+    def set_patient(self, patient_data):
+        """Set patient data (called by CreateOrderView)"""
+        if patient_data:
+            self.selected_patient_id = patient_data.get('user_id')
+            self.patient_display.setText(
+                f"{patient_data.get('first_name', '')} {patient_data.get('last_name', '')}"
+            )
+            self.patient_phone_display.setText(patient_data.get('phone', ''))
+            self.patient_address_display.setText(patient_data.get('address_1', ''))
+            self.patient_dob_display.setText(str(patient_data.get('Dateofbirth', '')))
+        else:
+            self.clear_patient()
+
+    def clear_patient(self):
+        """Clear patient info"""
+        self.selected_patient_id = None
+        self.patient_display.clear()
+        self.patient_phone_display.clear()
+        self.patient_address_display.clear()
+        self.patient_dob_display.clear()
 
     def scan_rx_image(self):
         """Select an Rx image file"""
@@ -164,13 +189,12 @@ class NewPrescriptionSection(QWidget):
 
     def clear(self):
         """Clear all fields"""
-        self.patient_edit.clear()
+        self.clear_patient()
         self.rx_image_path_edit.clear()
         self.medication_edit.clear()
         self.quantity_spin.setValue(30)
         self.instructions_edit.clear()
         self.prescriber_edit.clear()
-        self.selected_patient_id = None
         self.selected_medication_id = None
         self.selected_prescriber_id = None
         self.rx_image_path = None

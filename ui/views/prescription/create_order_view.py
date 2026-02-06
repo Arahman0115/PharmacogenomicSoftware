@@ -127,7 +127,10 @@ class CreateOrderView(QMainWindow):
         self.selected_patient = patient_data
         if patient_data:
             user_id = patient_data.get('user_id')
+            # Load refills for refill mode
             self.refill_section.load_refills(user_id)
+            # Set patient for new prescription mode
+            self.new_rx_section.set_patient(patient_data)
 
     def create_new_prescription_order(self):
         """Create order for new prescription and move to data entry"""
