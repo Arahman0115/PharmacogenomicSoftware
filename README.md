@@ -16,7 +16,6 @@ The software is built with modularity and scalability in mind:
 - **Database Layer:** Stores patient records, genetic profiles, prescription histories, and audit logs.
 - **Integration:** Designed for easy connection to external PGX databases and healthcare systems.
 
-## Screenshots
 
 ## Features
 - Secure login and authentication
@@ -25,10 +24,9 @@ The software is built with modularity and scalability in mind:
 - Prescription detail views
 - Product selection and dispensing queues
 
-## Screenshots
 
 ### 1. Login Page
-![Login Page](PNGS/login_page.png)
+![Login Page](PNGS/log_page.png)
 *Introduction:* Welcome to the Pharmacogenomic Software platform. This page introduces users to a secure environment where pharmacy professionals can access patient data, review prescriptions, and utilize genetic information to guide therapy. The login system ensures privacy and compliance with healthcare regulations.
 
 ### 2. Patient Profile
