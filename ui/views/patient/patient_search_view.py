@@ -28,7 +28,7 @@ class PatientSearchView(QWidget):
         button_layout.addStretch()
 
         new_patient_btn = QPushButton("New Patient")
-        new_patient_btn.setProperty("cssClass", "success")
+        new_patient_btn.setProperty("cssClass", "border_focus")
         new_patient_btn.clicked.connect(self.create_new_patient)
         button_layout.addWidget(new_patient_btn)
 
