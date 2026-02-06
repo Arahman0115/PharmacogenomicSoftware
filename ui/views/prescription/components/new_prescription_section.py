@@ -301,36 +301,48 @@ class PatientSearchDialog(QDialog):
 
 
 class MedicationSearchDialog(QDialog):
-    """Dialog to search and select a medication"""
+    """Dialog to search and select a medication with inventory display"""
     def __init__(self, db_connection, parent=None):
         super().__init__(parent)
         self.db_connection = db_connection
         self.selected_medication_id = None
         self.selected_medication_name = None
         self.setWindowTitle("Search Medication")
-        self.setGeometry(100, 100, 700, 400)
+        self.setGeometry(100, 100, 800, 500)
         self.init_ui()
 
     def init_ui(self):
         layout = QVBoxLayout(self)
 
-        # Search field
+        # Search field with live search
         search_layout = QHBoxLayout()
-        search_layout.addWidget(QLabel("Medication Name:"))
+        search_layout.addWidget(QLabel("Medication Name (live search):"))
         self.medication_edit = QLineEdit()
+        self.medication_edit.setPlaceholderText("Start typing to search...")
+        self.medication_edit.textChanged.connect(self.perform_search)  # Live search
         search_layout.addWidget(self.medication_edit)
-
-        search_btn = QPushButton("Search")
-        search_btn.setProperty("cssClass", "primary")
-        search_btn.clicked.connect(self.perform_search)
-        search_layout.addWidget(search_btn)
-
         layout.addLayout(search_layout)
 
-        # Results list
-        self.results_list = QListWidget()
-        self.results_list.itemDoubleClicked.connect(self.select_medication)
-        layout.addWidget(self.results_list)
+        # Results table
+        from PyQt6.QtWidgets import QTableWidget, QTableWidgetItem, QHeaderView
+        self.results_table = QTableWidget()
+        self.results_table.setColumnCount(4)
+        self.results_table.setHorizontalHeaderLabels(["Medication Name", "Bottles Available", "Medication ID", ""])
+
+        # Set column widths
+        header = self.results_table.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
+
+        self.results_table.itemDoubleClicked.connect(self.select_medication)
+        self.results_table.itemSelectionChanged.connect(self.on_row_selected)
+        layout.addWidget(self.results_table)
+
+        # Info label
+        self.info_label = QLabel("Enter at least 2 characters to search")
+        layout.addWidget(self.info_label)
 
         # Buttons
         btn_layout = QHBoxLayout()
@@ -347,46 +359,83 @@ class MedicationSearchDialog(QDialog):
         layout.addLayout(btn_layout)
 
     def perform_search(self):
-        """Search for medications in inventory"""
+        """Live search for medications"""
         med_name = self.medication_edit.text().strip()
 
-        if not med_name:
-            QMessageBox.warning(self, "Input Error", "Please enter a medication name.")
+        self.results_table.setRowCount(0)
+
+        if len(med_name) < 2:
+            self.info_label.setText("Enter at least 2 characters to search")
             return
 
         try:
-            # Search medications that are in stock
+            # Search medications with inventory count
             query = """
-                SELECT DISTINCT m.id, m.name, COUNT(b.bottle_id) as bottles_available
+                SELECT DISTINCT m.medication_id, m.medication_name, COUNT(b.bottle_id) as bottles_available
                 FROM medications m
-                LEFT JOIN bottles b ON m.id = b.medication_id AND b.status = 'in_stock'
-                WHERE m.name LIKE %s
-                GROUP BY m.id, m.name
+                LEFT JOIN bottles b ON m.medication_id = b.medication_id AND b.status = 'in_stock'
+                WHERE m.medication_name LIKE %s
+                GROUP BY m.medication_id, m.medication_name
+                ORDER BY m.medication_name ASC
+                LIMIT 50
             """
             self.db_connection.cursor.execute(query, (f"%{med_name}%",))
             results = self.db_connection.cursor.fetchall()
 
-            self.results_list.clear()
+            if not results:
+                self.info_label.setText(f"No medications found matching '{med_name}'")
+                return
+
+            self.info_label.setText(f"Found {len(results)} medication(s)")
+
             for med in results:
+                row = self.results_table.rowCount()
+                self.results_table.insertRow(row)
+
+                # Medication name
+                name_item = QTableWidgetItem(med['medication_name'])
+                self.results_table.setItem(row, 0, name_item)
+
+                # Inventory count with color coding
                 stock = med['bottles_available'] if med['bottles_available'] else 0
-                item_text = f"{med['name']} ({stock} bottles available)"
-                item = QListWidgetItem(item_text)
-                item.setData(256, med)
-                self.results_list.addItem(item)
+                stock_item = QTableWidgetItem(f"{stock} available")
+                if stock == 0:
+                    stock_item.setBackground(QColor(200, 100, 100))  # Red for out of stock
+                elif stock < 5:
+                    stock_item.setBackground(QColor(220, 180, 60))   # Yellow for low stock
+                else:
+                    stock_item.setBackground(QColor(100, 180, 100))  # Green for in stock
+                self.results_table.setItem(row, 1, stock_item)
+
+                # Medication ID
+                id_item = QTableWidgetItem(str(med['medication_id']))
+                self.results_table.setItem(row, 2, id_item)
+
+                # Store full medication data
+                self.results_table.item(row, 0).setData(256, med)
 
         except Exception as e:
+            self.info_label.setText(f"Search error: {str(e)}")
             QMessageBox.critical(self, "Error", f"Search failed: {str(e)}")
+
+    def on_row_selected(self):
+        """Handle row selection"""
+        pass
 
     def select_medication(self):
         """Select highlighted medication"""
-        item = self.results_list.currentItem()
-        if not item:
+        current_row = self.results_table.currentRow()
+        if current_row < 0:
             QMessageBox.warning(self, "Selection Error", "Please select a medication.")
             return
 
-        med = item.data(256)
-        self.selected_medication_id = med['id']
-        self.selected_medication_name = med['name']
+        med = self.results_table.item(current_row, 0).data(256)
+        if not med:
+            QMessageBox.warning(self, "Selection Error", "Please select a medication.")
+            return
+
+        self.selected_medication_id = med['medication_id']
+        self.selected_medication_name = med['medication_name']
         self.accept()
 
 
