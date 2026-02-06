@@ -59,7 +59,7 @@ migrations/
 *.exe
 
 # Ignore reports
-*.md
+
 *.txt
 
 # Ignore test outputs
