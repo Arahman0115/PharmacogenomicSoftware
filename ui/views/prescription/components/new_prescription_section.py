@@ -1,7 +1,8 @@
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGroupBox, QLabel, QLineEdit,
     QPushButton, QDialog, QListWidget, QListWidgetItem, QMessageBox,
-    QFileDialog, QDoubleSpinBox, QGridLayout
+    QFileDialog, QDoubleSpinBox, QGridLayout, QTableWidget, QTableWidgetItem,
+    QHeaderView
 )
 from PyQt6.QtCore import pyqtSignal, Qt
 from PyQt6.QtGui import QColor
@@ -324,7 +325,6 @@ class MedicationSearchDialog(QDialog):
         layout.addLayout(search_layout)
 
         # Results table
-        from PyQt6.QtWidgets import QTableWidget, QTableWidgetItem, QHeaderView
         self.results_table = QTableWidget()
         self.results_table.setColumnCount(4)
         self.results_table.setHorizontalHeaderLabels(["Medication Name", "Bottles Available", "Medication ID", ""])
