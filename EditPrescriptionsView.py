@@ -10,6 +10,7 @@ from datetime import datetime, timedelta
 import json
 import base64
 from DataBaseConnection import DatabaseConnection
+from config import DatabaseConfig
 
 
 class EditPrescriptionView(QWidget):
@@ -20,12 +21,7 @@ class EditPrescriptionView(QWidget):
         super().__init__(parent)
 
         # Create our own database connection
-        self.db = DatabaseConnection(
-            host='localhost',
-            user='pgx_user',
-            password="pgx_password",
-            database='pgx_db'
-        )
+        self.db = DatabaseConnection(**DatabaseConfig.get_connection_params())
 
         self.entry = entry
         self.puid = entry.get('user_id', None)  # Get user_id from entry
@@ -149,7 +145,7 @@ class EditPrescriptionView(QWidget):
         self.reselect_product_btn = QPushButton("Re-select Product")
         self.reselect_product_btn.setProperty("cssClass", "warning")
         self.reselect_product_btn.clicked.connect(self.reselect_product)
-        db_connection = DatabaseConnection(host='localhost', user='pgx_user', password="pgx_password", database='pgx_db')
+        db_connection = DatabaseConnection(**DatabaseConfig.get_connection_params())
 
 
         db_connection.cursor.execute("""

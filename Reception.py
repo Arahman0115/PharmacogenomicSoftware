@@ -7,6 +7,7 @@ from PyQt6.QtCore import Qt, QDateTime
 from PyQt6.QtGui import QFont, QIcon, QPixmap, QPainter
 from ScanImage import ScanRxImageView
 from DataBaseConnection import DatabaseConnection
+from config import DatabaseConfig
 import datetime
 
 
@@ -215,14 +216,7 @@ class ReceptionView(QWidget):
 
     def get_fresh_db_connection(self):
         """Create a fresh database connection each time"""
-        return DatabaseConnection(
-
-        host='127.0.0.1',
-        user='pgx_user',
-        password='Auddin',
-        database='pgx_db',
-        port=3307
-        )
+        return DatabaseConnection(**DatabaseConfig.get_connection_params())
 
     def load_queue(self):
         """Load queue data with completely fresh database connection"""

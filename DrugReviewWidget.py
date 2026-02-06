@@ -4,13 +4,14 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt
 from DataBaseConnection import DatabaseConnection
+from config import DatabaseConfig
 from datetime import datetime
 import json
 
 class DrugReviewWidget(QWidget):
     def __init__(self):
         super().__init__()
-        self.db = DatabaseConnection(host='localhost', user='pgx_user', password='pgx_password', database='pgx_db')
+        self.db = DatabaseConnection(**DatabaseConfig.get_connection_params())
         self.init_ui()
         self.load_active_prescriptions()
 

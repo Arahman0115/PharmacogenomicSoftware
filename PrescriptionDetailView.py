@@ -4,6 +4,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtGui import QPixmap
 from PyQt6.QtCore import Qt
 from DataBaseConnection import DatabaseConnection
+from config import DatabaseConfig
 
 
 class PrescriptionDetailView(QDialog):
@@ -101,12 +102,7 @@ class PrescriptionDetailView(QDialog):
             image_bytes = f.read()
 
         # Create a fresh database connection
-        db = DatabaseConnection(
-            host='localhost',
-            user='pgx_user',
-            password="pgx_password",
-            database='pgx_db'
-        )
+        db = DatabaseConnection(**DatabaseConfig.get_connection_params())
 
         try:
             db.cursor.execute(
