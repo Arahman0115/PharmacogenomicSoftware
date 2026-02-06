@@ -20,13 +20,6 @@ from ui.views.prescription.edit_prescription_view import EditPrescriptionView
 from ui.views.pgx_dashboard import PgxDashboardView
 from ui.views.audit_log_dialog import ensure_audit_table
 
-# Keep old imports as fallback during migration
-from ProductQueue import ProductQueue
-from RxSearchWidget import RxSearchWidget
-from patient_search import PatientSearchSystem
-from DrugReviewWidget import DrugReviewWidget
-from ProductSelectionView import ProductSelectionView
-from CreateOrderReception import CreateOrderWindow
 class MainWindow(QMainWindow):
     def __init__(self,db_connection):
         super().__init__()
