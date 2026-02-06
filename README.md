@@ -31,7 +31,7 @@ The software is built with modularity and scalability in mind:
 
 ### 2. Patient Profile
 ![Patient Genomics Tab](PNGS/genomics_tab.png)
-*Genomics Tab:* This tab provides a detailed visualization of the patient's pharmacogenomic profile, including actionable genetic variants, metabolizer status, and gene-drug relationships. It empowers clinicians to quickly assess how a patient's genetics may impact drug response, risk of adverse effects, and optimal therapy selection. The interface highlights clinically significant findings and links to supporting evidence.
+*Genomics Tab:* This tab provides a detailed visualization of the patient's pharmacogenomic profile, including actionable genetic variants, and gene-drug relationships. It empowers clinicians to quickly assess how a patient's genetics may impact drug response, risk of adverse effects, and optimal therapy selection. Clinicians are also able to add genetic variants here. The interface highlights clinically significant findings and links to supporting evidence.
 
 ![Patient Drug Review Tab](PNGS/drug_review_tab.png)
 *Drug Review Tab (Patient Profile):* This section summarizes all current and historical prescriptions for the patient, cross-referenced with their genetic data. It flags potential drug-gene interactions, provides genotype-based dosing guidance, and offers alerts for contraindications. The tab is designed to streamline the review process and ensure that every medication is evaluated in the context of the patient's unique genetic makeup.
