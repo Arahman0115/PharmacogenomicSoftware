@@ -1,0 +1,82 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.pyc
+*.pdb
+*.egg
+*.eggs
+*.env
+*.venv
+env/
+venv/
+build/
+dist/
+*.egg-info/
+*.eggs/
+*.whl
+
+# Jupyter
+.ipynb_checkpoints/
+
+# VS Code
+.vscode/
+
+# Docker
+*.log
+docker/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment
+pharmguienv/
+
+# Database
+*.sqlite
+*.db
+
+# Misc
+*.swp
+*.swo
+*.bak
+*.tmp
+fonts/
+PNGS/
+
+# Ignore secrets
+*.env
+secrets/
+
+# Ignore migrations
+migrations/
+
+# Ignore compiled files
+*.so
+*.dll
+*.exe
+
+# Ignore reports
+*.md
+*.txt
+
+# Ignore test outputs
+test-output/
+
+# Ignore ExpirationQueueFolder cache
+ExpirationQueueFolder/__pycache__/
+
+# Ignore UI cache
+ui/__pycache__/
+
+# Ignore config cache
+config/__pycache__/
+
+# Ignore services cache
+services/__pycache__/
+
+# Ignore database cache
+db/__pycache__/
+docs/
