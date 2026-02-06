@@ -153,12 +153,27 @@ class DataEntryEditorDialog(QDialog):
         self.date_written.setCalendarPopup(True)
         details_layout.addRow("Date Written:", self.date_written)
 
-        # Quantity dispensed
+        # Quantity written (read-only - from prescription)
+        self.quantity_written = QSpinBox()
+        self.quantity_written.setMinimum(1)
+        self.quantity_written.setMaximum(9999)
+        self.quantity_written.setValue(self.rx_data.get('quantity', 30))
+        self.quantity_written.setReadOnly(True)
+        details_layout.addRow("Quantity Written:", self.quantity_written)
+
+        # Quantity dispensed (editable - what pharmacist will dispense)
         self.quantity = QSpinBox()
         self.quantity.setMinimum(1)
         self.quantity.setMaximum(9999)
         self.quantity.setValue(self.rx_data.get('quantity', 30))
-        details_layout.addRow("Quantity Dispensed:", self.quantity)
+        details_layout.addRow("Quantity Dispensing:", self.quantity)
+
+        # Refills
+        self.refills = QSpinBox()
+        self.refills.setMinimum(0)
+        self.refills.setMaximum(999)
+        self.refills.setValue(self.rx_data.get('refills', 0))
+        details_layout.addRow("Refills Remaining:", self.refills)
 
         # Instructions
         self.instructions = QTextEdit()
@@ -223,6 +238,7 @@ class DataEntryEditorDialog(QDialog):
                     instructions = %s,
                     delivery = %s,
                     promise_time = %s,
+                    refills = %s,
                     status = 'data_entry_complete'
                 WHERE id = %s
             """
@@ -234,6 +250,7 @@ class DataEntryEditorDialog(QDialog):
                 self.instructions.toPlainText(),
                 self.delivery.currentText(),
                 promise_datetime,
+                self.refills.value(),
                 self.rx_id
             ))
 
@@ -268,16 +285,33 @@ class DataEntryEditorDialog(QDialog):
                         self.rx_data.get('rx_store_num', '03102-000')
                     ))
 
-                    # Get the prescription_id just inserted
+                    # Get the prescription_id just inserted and generate rx_number
                     prescription_id = cursor.lastrowid
+                    rx_number = f"RX{str(prescription_id).zfill(6)}"
+
+                    # Update with rx_number
+                    cursor.execute(
+                        "UPDATE ActivatedPrescriptions SET rx_number = %s WHERE prescription_id = %s",
+                        (rx_number, prescription_id)
+                    )
                 else:
                     # Get existing prescription_id
                     cursor.execute(
-                        "SELECT prescription_id FROM ActivatedPrescriptions WHERE user_id = %s AND medication_id = %s LIMIT 1",
+                        "SELECT prescription_id, rx_number FROM ActivatedPrescriptions WHERE user_id = %s AND medication_id = %s LIMIT 1",
                         (self.user_id, med_id)
                     )
                     result = cursor.fetchone()
                     prescription_id = result.get('prescription_id') if result else None
+
+                    # Generate rx_number if not already set
+                    if prescription_id:
+                        existing_rx = result.get('rx_number')
+                        if not existing_rx:
+                            rx_number = f"RX{str(prescription_id).zfill(6)}"
+                            cursor.execute(
+                                "UPDATE ActivatedPrescriptions SET rx_number = %s WHERE prescription_id = %s",
+                                (rx_number, prescription_id)
+                            )
 
                 # Drug-drug interaction check
                 self._check_drug_drug_interactions(cursor, med_id)

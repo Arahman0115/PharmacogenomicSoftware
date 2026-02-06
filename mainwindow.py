@@ -18,7 +18,7 @@ from ui.views.patient.patient_search_view import PatientSearchView
 from ui.views.prescription.create_order_view import CreateOrderView
 from ui.views.prescription.edit_prescription_view import EditPrescriptionView
 from ui.views.pgx_dashboard import PgxDashboardView
-from ui.views.audit_log_dialog import ensure_audit_table
+from ui.views.audit_log_dialog import ensure_audit_table, ensure_rx_number_column
 
 class MainWindow(QMainWindow):
     def __init__(self,db_connection):
@@ -64,6 +64,8 @@ class MainWindow(QMainWindow):
 
         # Ensure audit table exists
         ensure_audit_table(db_connection)
+        # Ensure rx_number column exists
+        ensure_rx_number_column(db_connection)
 
         # Show "Search All Rx" view on startup instead of "reception"
         self.show_queue("rx_lookup")

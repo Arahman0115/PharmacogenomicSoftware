@@ -141,6 +141,7 @@ class CreateOrderView(QMainWindow):
         try:
             cursor = self.db_connection.cursor
             patient_id = rx_data['patient_id']
+            medication_id = rx_data['medication_id']
 
             # Get patient info
             cursor.execute("SELECT first_name, last_name FROM patientsinfo WHERE user_id = %s", (patient_id,))
@@ -148,43 +149,61 @@ class CreateOrderView(QMainWindow):
             if not patient:
                 raise Exception("Patient not found")
 
-            # Get NDC from bottles table
-            query_ndc = "SELECT ndc FROM bottles WHERE medication_id = %s LIMIT 1"
-            cursor.execute(query_ndc, (rx_data['medication_id'],))
-            ndc_row = cursor.fetchone()
-            ndc = ndc_row['ndc'] if ndc_row else "000000000"
-
             # Get current date/time for promise
             promise_datetime = (datetime.now() + timedelta(days=1)).strftime('%Y-%m-%d %H:%M:%S')
 
-            # Prepare insert data
-            insert_data = (
-                promise_datetime,
-                "03102",  # rx_store_num (default fill store)
+            # Prepare data for ProductSelectionQueue (reception intake)
+            psq_data = (
+                patient_id,
                 patient['first_name'],
                 patient['last_name'],
                 rx_data['medication_name'],
                 rx_data['quantity'],
-                "Pick-up",  # default delivery
-                "No",  # printed
                 rx_data['instructions'],
-                None,  # prescription_id (null for new rx)
-                ndc,
-                "new",  # refillornewrx
-                patient_id
+                "Pick-up",  # default delivery
+                promise_datetime,
+                "03102",  # rx_store_num (default fill store)
+                "pending",
+                rx_data['refills']  # refills from prescription
             )
 
-            # Insert into both ProductSelectionQueue (reception) and ActivatedPrescriptions (workflow)
+            # Prepare data for ActivatedPrescriptions (workflow tracking)
+            ap_data = (
+                patient_id,
+                medication_id,
+                None,  # prescriber_id (can add later)
+                rx_data['quantity'],
+                patient['first_name'],
+                patient['last_name'],
+                "03102",  # rx_store_num
+                "03102",  # store_number
+                "data_entry_pending",  # initial status
+                (datetime.now() + timedelta(days=1)).strftime('%Y-%m-%d')  # fill_date
+            )
+
+            # Insert into ProductSelectionQueue (reception intake)
             insert_query_psq = """INSERT INTO ProductSelectionQueue
-                (promise_time, rx_store_num, first_name, last_name, product, quantity, delivery, printed, instructions, prescription_id, ndc, refillornewrx, user_id, status)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'pending')"""
+                (user_id, first_name, last_name, product, quantity, instructions, delivery, promise_time, rx_store_num, status, refills)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"""
 
+            # Insert into ActivatedPrescriptions (workflow tracking)
             insert_query_ap = """INSERT INTO ActivatedPrescriptions
-                (promise_time, rx_store_num, first_name, last_name, product, quantity, delivery, printed, instructions, prescription_id, ndc, refillornewrx, user_id, status)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'data_entry_pending')"""
+                (user_id, medication_id, prescriber_id, quantity_dispensed, first_name, last_name, rx_store_num, store_number, status, fill_date)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"""
 
-            cursor.execute(insert_query_psq, insert_data)
-            cursor.execute(insert_query_ap, insert_data)
+            cursor.execute(insert_query_psq, psq_data)
+            cursor.execute(insert_query_ap, ap_data)
+
+            # Get the prescription_id just inserted and generate rx_number
+            prescription_id = cursor.lastrowid
+            rx_number = f"RX{str(prescription_id).zfill(6)}"
+
+            # Update with rx_number
+            cursor.execute(
+                "UPDATE ActivatedPrescriptions SET rx_number = %s WHERE prescription_id = %s",
+                (rx_number, prescription_id)
+            )
+
             self.db_connection.connection.commit()
 
             QMessageBox.information(

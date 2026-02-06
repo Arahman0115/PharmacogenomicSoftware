@@ -57,25 +57,23 @@ class DrugReviewQueueView(BaseQueueView):
             return
 
         try:
-            # Get from drugreviewqueue but JOIN with drug_review to get gene/variant
+            # Get from drugreviewqueue - only need one row per prescription (DISTINCT eliminates duplicate variants)
             query = """
-                SELECT
+                SELECT DISTINCT
                     drq.id,
                     drq.prescription_id as rx_id,
                     drq.user_id,
                     drq.medication_id,
                     CONCAT(pt.first_name, ' ', pt.last_name) as patient_name,
                     COALESCE(m.medication_name, 'Unknown') as medication_name,
-                    COALESCE(dr.gene, '') as gene,
-                    COALESCE(dr.variant, '') as variant,
+                    '' as gene,
+                    '' as variant,
                     drq.risk_level,
                     drq.status,
                     drq.created_date
                 FROM drugreviewqueue drq
                 JOIN patientsinfo pt ON drq.user_id = pt.user_id
                 LEFT JOIN medications m ON drq.medication_id = m.medication_id
-                LEFT JOIN drug_review dr ON drq.medication_id = dr.medication_id
-                    AND dr.status = 'active'
                 WHERE drq.status = 'pending'
                 ORDER BY
                     CASE drq.risk_level
@@ -93,8 +91,9 @@ class DrugReviewQueueView(BaseQueueView):
             rows = self.db_connection.cursor.fetchall()
 
             # Get total count (only pending, not approved)
+            # Use DISTINCT to count unique prescriptions, not variant duplicates
             self.db_connection.cursor.execute(
-                "SELECT COUNT(*) as count FROM drugreviewqueue WHERE status = 'pending'"
+                "SELECT COUNT(DISTINCT prescription_id) as count FROM drugreviewqueue WHERE status = 'pending'"
             )
             count_result = self.db_connection.cursor.fetchone()
             self.total_records = count_result.get('count', 0)

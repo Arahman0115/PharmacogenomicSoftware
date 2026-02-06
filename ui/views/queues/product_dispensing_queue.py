@@ -6,6 +6,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt
 from .base_queue_view import BaseQueueView
 from ui.views.audit_log_dialog import log_transition
+from .components.rx_verification_dialog import RxVerificationDialog
 
 
 class ProductDispensingQueueView(BaseQueueView):
@@ -76,7 +77,8 @@ class ProductDispensingQueueView(BaseQueueView):
                     p.status,
                     p.last_updated,
                     pt.user_id,
-                    p.medication_id
+                    p.medication_id,
+                    p.rx_number
                 FROM ActivatedPrescriptions p
                 JOIN patientsinfo pt ON p.user_id = pt.user_id
                 LEFT JOIN medications m ON p.medication_id = m.medication_id
@@ -201,7 +203,7 @@ class BottleSelectionDialog(QDialog):
             cursor.execute("""
                 SELECT bottle_id, ndc, quantity, expiration_date, status
                 FROM bottles
-                WHERE medication_id = %s AND quantity > 0 AND status = 'available'
+                WHERE medication_id = %s AND quantity > 0 AND status = 'in_stock'
                 ORDER BY expiration_date ASC
             """, (self.medication_id,))
             bottles = cursor.fetchall()
@@ -221,7 +223,7 @@ class BottleSelectionDialog(QDialog):
             QMessageBox.critical(self, "Error", f"Failed to load bottles: {e}")
 
     def select_bottle(self):
-        """Select the highlighted bottle and move prescription to verification"""
+        """Select the highlighted bottle and show Rx verification dialog"""
         selected_rows = self.bottles_table.selectionModel().selectedRows()
         if not selected_rows:
             QMessageBox.warning(self, "No Selection", "Please select a bottle first.")
@@ -238,9 +240,9 @@ class BottleSelectionDialog(QDialog):
             # Record in inusebottles
             cursor.execute("""
                 INSERT INTO inusebottles
-                (bottle_id, prescription_id, user_id, medication_id, quantity_used, date_used)
-                VALUES (%s, %s, %s, %s, %s, NOW())
-            """, (bottle_id, self.rx_id, self.user_id, self.medication_id, quantity_needed))
+                (bottle_id, prescription_id, quantity_used, start_date, status)
+                VALUES (%s, %s, %s, NOW(), 'in_use')
+            """, (bottle_id, self.rx_id, quantity_needed))
 
             # Decrement bottle quantity
             cursor.execute("""
@@ -249,26 +251,60 @@ class BottleSelectionDialog(QDialog):
                 WHERE bottle_id = %s
             """, (quantity_needed, bottle_id))
 
-            # Update ActivatedPrescriptions status to verification_pending
-            cursor.execute("""
-                UPDATE ActivatedPrescriptions
-                SET status = 'verification_pending'
-                WHERE prescription_id = %s
-            """, (self.rx_id,))
-
-            log_transition(
-                self.db_connection, self.rx_id,
-                'product_dispensing_pending', 'verification_pending',
-                f'Bottle #{bottle_id} selected for dispensing'
-            )
             self.db_connection.connection.commit()
 
-            QMessageBox.information(
-                self, "Success",
-                f"Bottle selected. Moving to Verification Queue..."
+            # Show Rx verification dialog
+            rx_data_for_verify = self.rx_data.copy()
+            rx_data_for_verify['prescription_id'] = self.rx_id
+
+            verify_dialog = RxVerificationDialog(
+                self.db_connection,
+                rx_data_for_verify,
+                bottle_data,
+                self
             )
-            self.accept()
+
+            if verify_dialog.exec() == QDialog.DialogCode.Accepted:
+                if verify_dialog.verified:
+                    # Rx and NDC verified - move to verification queue
+                    cursor.execute("""
+                        UPDATE ActivatedPrescriptions
+                        SET status = 'verification_pending'
+                        WHERE prescription_id = %s
+                    """, (self.rx_id,))
+
+                    log_transition(
+                        self.db_connection, self.rx_id,
+                        'product_dispensing_pending', 'verification_pending',
+                        f'Bottle #{bottle_id} selected and verified for dispensing'
+                    )
+                    self.db_connection.connection.commit()
+
+                    QMessageBox.information(
+                        self, "Success",
+                        "Verification passed. Moving to Verification Queue..."
+                    )
+                    self.accept()
+                else:
+                    # Prescription was cancelled - show success and close
+                    QMessageBox.information(
+                        self, "Cancelled",
+                        "Prescription has been cancelled and moved to patient history."
+                    )
+                    self.accept()
+            else:
+                # User returned to bottle selection - revert the bottle allocation
+                cursor.execute(
+                    "DELETE FROM inusebottles WHERE bottle_id = %s AND prescription_id = %s",
+                    (bottle_id, self.rx_id)
+                )
+                cursor.execute(
+                    "UPDATE bottles SET quantity = quantity + %s WHERE bottle_id = %s",
+                    (quantity_needed, bottle_id)
+                )
+                self.db_connection.connection.commit()
+                # Dialog closed - stay in bottle selection
 
         except Exception as e:
             self.db_connection.connection.rollback()
-            QMessageBox.critical(self, "Error", f"Failed to select bottle: {e}")
+            QMessageBox.critical(self, "Error", f"Failed to process bottle selection: {e}")

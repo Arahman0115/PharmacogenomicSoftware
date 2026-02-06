@@ -103,12 +103,6 @@ class GenomicsTab(QWidget):
             QMessageBox.information(self, "Results", f"No drug interactions found for {variant}")
             return
 
-        # Display results
-        result_text = f"Found {len(conflicts)} potential medication conflicts:\n\n"
-        for conflict in conflicts:
-            result_text += f"• {conflict['medication_name']} (Risk: {conflict['risk_level']}, Score: {conflict['score']})\n"
-
-        QMessageBox.information(self, "PharmGKB Results", result_text)
 
     def add_variant(self):
         """Add variant to patient record and create drug review entries"""
@@ -134,6 +128,8 @@ class GenomicsTab(QWidget):
 
         # Save to database
         if not conflicts:
+            # Remove duplicates
+            conflicts = list(set(conflicts))
             # Still save the variant even if no conflicts found
             try:
                 cursor = self.db_connection.cursor
