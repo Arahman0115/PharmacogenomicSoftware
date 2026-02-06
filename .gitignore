@@ -44,7 +44,7 @@ pharmguienv/
 *.bak
 *.tmp
 fonts/
-PNGS/
+
 
 # Ignore secrets
 *.env
