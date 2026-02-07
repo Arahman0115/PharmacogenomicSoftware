@@ -152,6 +152,41 @@ class ReleaseQueueView(BaseQueueView):
             )
             dialog.exec()
 
+    def open_prescription_modal(self, prescription_id: int):
+        """Open prescription modal for a specific prescription ID (from search)"""
+        try:
+            # Query ReadyForPickUp to get prescription data by ID
+            query = """
+                SELECT
+                    p.prescription_id as rx_id,
+                    p.user_id,
+                    CONCAT(pi.last_name, ', ', pi.first_name) as patient_name,
+                    m.medication_name,
+                    p.quantity_dispensed,
+                    p.release_date
+                FROM ReadyForPickUp p
+                JOIN patientsinfo pi ON p.user_id = pi.user_id
+                LEFT JOIN medications m ON p.medication_id = m.medication_id
+                WHERE p.prescription_id = %s
+            """
+            self.db_connection.cursor.execute(query, (prescription_id,))
+            rx_data = self.db_connection.cursor.fetchone()
+
+            if rx_data:
+                from PyQt6.QtWidgets import QMessageBox
+                dialog = AllScriptsReadyForPtView(
+                    self.db_connection,
+                    rx_data,
+                    parent=self
+                )
+                dialog.exec()
+            else:
+                from PyQt6.QtWidgets import QMessageBox
+                QMessageBox.warning(self, "Not Found", f"Prescription {prescription_id} not found")
+        except Exception as e:
+            from PyQt6.QtWidgets import QMessageBox
+            QMessageBox.critical(self, "Error", f"Failed to open prescription: {e}")
+
     def release_prescription(self, prescription_data):
         """Release prescription to patient"""
         try:

@@ -1,0 +1,12 @@
+##fileformat=VCFv4.2
+##reference=GRCh38
+##source=PharmacoGenomics_Test_VCF
+##INFO=<ID=GENE,Number=1,Type=String,Description="Gene name">
+##INFO=<ID=RSID,Number=1,Type=String,Description="dbSNP rsID">
+##INFO=<ID=IMPACT,Number=1,Type=String,Description="Clinical impact">
+#CHROM	POS	ID	REF	ALT	QUAL	FILTER	INFO
+12	21331549	rs4149056	T	C	100	PASS	GENE=SLCO1B1;RSID=rs4149056;IMPACT=Decreased transporter function (statin myopathy risk)
+10	96521616	rs4244285	G	A	99	PASS	GENE=CYP2C19;RSID=rs4244285;IMPACT=Loss of function (*2 allele)
+10	96540410	rs12248560	C	T	98	PASS	GENE=CYP2C19;RSID=rs12248560;IMPACT=Increased function (*17 allele)
+22	42526694	rs3892097	G	A	97	PASS	GENE=CYP2D6;RSID=rs3892097;IMPACT=Loss of function (*4 allele)
+

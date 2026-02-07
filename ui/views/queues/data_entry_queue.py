@@ -7,6 +7,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QDate
 from .base_queue_view import BaseQueueView
 from ui.views.audit_log_dialog import log_transition
+from services.contact_service import ContactService
 
 
 class DataEntryQueueView(BaseQueueView):
@@ -100,6 +101,40 @@ class DataEntryQueueView(BaseQueueView):
             if dialog.exec() == QDialog.DialogCode.Accepted:
                 # Reload data after successful edit
                 self.load_data()
+
+    def open_prescription_modal(self, prescription_id: int):
+        """Open prescription modal for a specific prescription ID (from search)"""
+        try:
+            # Query ActivatedPrescriptions to get prescription data by ID
+            query = """
+                SELECT
+                    ap.prescription_id as id,
+                    ap.user_id,
+                    CONCAT(pi.first_name, ' ', pi.last_name) as patient_name,
+                    m.medication_name as product,
+                    ap.quantity_dispensed as quantity,
+                    '' as instructions,
+                    ap.status,
+                    ap.fill_date as promise_time,
+                    0 as refills,
+                    ap.medication_id,
+                    'Pick Up' as delivery
+                FROM ActivatedPrescriptions ap
+                JOIN patientsinfo pi ON ap.user_id = pi.user_id
+                LEFT JOIN medications m ON ap.medication_id = m.medication_id
+                WHERE ap.prescription_id = %s
+            """
+            self.db_connection.cursor.execute(query, (prescription_id,))
+            rx_data = self.db_connection.cursor.fetchone()
+
+            if rx_data:
+                dialog = DataEntryEditorDialog(self.db_connection, rx_data, self)
+                if dialog.exec() == QDialog.DialogCode.Accepted:
+                    self.load_data()
+            else:
+                QMessageBox.warning(self, "Not Found", f"Prescription {prescription_id} not found")
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to open prescription: {e}")
 
 
 class DataEntryEditorDialog(QDialog):
@@ -214,17 +249,177 @@ class DataEntryEditorDialog(QDialog):
 
         button_layout.addStretch()
 
+        clarification_btn = QPushButton("Request Clarification")
+        clarification_btn.setProperty("cssClass", "warning")
+        clarification_btn.clicked.connect(self.request_clarification)
+        button_layout.addWidget(clarification_btn)
+
+        cancel_prescription_btn = QPushButton("Cancel Prescription")
+        cancel_prescription_btn.setProperty("cssClass", "danger")
+        cancel_prescription_btn.clicked.connect(self.cancel_prescription)
+        button_layout.addWidget(cancel_prescription_btn)
+
         save_btn = QPushButton("Save & Continue")
         save_btn.setProperty("cssClass", "primary")
         save_btn.clicked.connect(self.save_and_continue)
         button_layout.addWidget(save_btn)
 
-        cancel_btn = QPushButton("Cancel")
-        cancel_btn.setProperty("cssClass", "ghost")
-        cancel_btn.clicked.connect(self.reject)
-        button_layout.addWidget(cancel_btn)
+        close_btn = QPushButton("Close")
+        close_btn.setProperty("cssClass", "ghost")
+        close_btn.clicked.connect(self.reject)
+        button_layout.addWidget(close_btn)
 
         layout.addLayout(button_layout)
+
+    def cancel_prescription(self):
+        """Cancel the prescription and move to patient history"""
+        if QMessageBox.question(
+            self, "Cancel Prescription",
+            "Are you sure you want to cancel this prescription?\n\nIt will be moved to the patient's prescription history.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        ) == QMessageBox.StandardButton.Yes:
+            self._move_to_patient_history()
+
+    def _move_to_patient_history(self):
+        """Move prescription from ActivatedPrescriptions to Prescriptions table"""
+        try:
+            cursor = self.db_connection.cursor
+            prescription_id = self.rx_id
+            user_id = self.user_id
+            medication_id = self.rx_data.get('medication_id')
+
+            # Get current prescription details
+            cursor.execute(
+                """SELECT quantity_dispensed FROM ActivatedPrescriptions WHERE prescription_id = %s""",
+                (prescription_id,)
+            )
+            ap_data = cursor.fetchone()
+            if not ap_data:
+                raise Exception("Prescription not found in ActivatedPrescriptions")
+
+            # Move to Prescriptions table (patient history)
+            insert_query = """
+                INSERT INTO Prescriptions
+                (user_id, medication_id, quantity_dispensed, refills_remaining,
+                 instructions, status, rx_store_num, fill_date, last_fill_date)
+                VALUES (%s, %s, %s, 1, '', 'cancelled_not_dispensed', '', NOW(), NOW())
+            """
+
+            cursor.execute(insert_query, (
+                user_id,
+                medication_id,
+                ap_data.get('quantity_dispensed', 0)
+            ))
+
+            # Restore bottle quantity if it was allocated
+            cursor.execute(
+                "SELECT bottle_id, quantity_used FROM inusebottles WHERE prescription_id = %s",
+                (prescription_id,)
+            )
+            bottle_allocation = cursor.fetchone()
+
+            if bottle_allocation:
+                cursor.execute(
+                    "UPDATE bottles SET quantity = quantity + %s WHERE bottle_id = %s",
+                    (bottle_allocation.get('quantity_used', 0), bottle_allocation.get('bottle_id'))
+                )
+
+            # Delete from inusebottles (if bottle was allocated)
+            cursor.execute(
+                "DELETE FROM inusebottles WHERE prescription_id = %s",
+                (prescription_id,)
+            )
+
+            # Delete from ActivatedPrescriptions
+            cursor.execute(
+                "DELETE FROM ActivatedPrescriptions WHERE prescription_id = %s",
+                (prescription_id,)
+            )
+
+            # Delete from ProductSelectionQueue if still there
+            cursor.execute(
+                "DELETE FROM ProductSelectionQueue WHERE user_id = %s AND status IN ('pending', 'in_progress') LIMIT 1",
+                (user_id,)
+            )
+
+            self.db_connection.connection.commit()
+
+            QMessageBox.information(
+                self, "Success",
+                f"Prescription cancelled and moved to patient history."
+            )
+
+            self.reject()
+
+        except Exception as e:
+            self.db_connection.connection.rollback()
+            QMessageBox.critical(self, "Error", f"Failed to cancel prescription: {e}")
+
+    def request_clarification(self):
+        """Create a clarification request with prescriber"""
+        try:
+            cursor = self.db_connection.cursor
+            prescription_id = self.rx_id
+            medication_name = self.rx_data.get('product', '')
+
+            # Get prescriber_id and medication_id from ActivatedPrescriptions
+            cursor.execute("""
+                SELECT prescriber_id, medication_id FROM ActivatedPrescriptions
+                WHERE prescription_id = %s
+            """, (prescription_id,))
+            ap_data = cursor.fetchone()
+
+            if not ap_data or not ap_data.get('prescriber_id'):
+                QMessageBox.warning(
+                    self, "Cannot Create Request",
+                    "Prescriber information is not available for this prescription."
+                )
+                return
+
+            # Open dialog to get clarification reason
+            reason, ok = self.get_clarification_reason()
+            if not ok or not reason:
+                return
+
+            # Create the clarification request
+            contact_service = ContactService(self.db_connection)
+            success = contact_service.create_clarification_request(
+                user_id=self.user_id,
+                prescriber_id=ap_data.get('prescriber_id'),
+                prescription_id=prescription_id,
+                medication_id=ap_data.get('medication_id'),
+                reason=reason
+            )
+
+            if success:
+                QMessageBox.information(
+                    self, "Request Created",
+                    f"Clarification request created for {medication_name}.\n\n"
+                    "The prescriber will be contacted to provide the needed clarification.\n"
+                    "You can track this request in the Contact Queue."
+                )
+                self.reject()
+            else:
+                QMessageBox.critical(self, "Error", "Failed to create clarification request")
+
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Error creating clarification request: {e}")
+
+    def get_clarification_reason(self):
+        """Open dialog to get reason for clarification"""
+        from PyQt6.QtWidgets import QInputDialog
+        reason, ok = QInputDialog.getMultiLineText(
+            self,
+            "Request Clarification",
+            "What clarification is needed from the prescriber?\n\n"
+            "Examples:\n"
+            "- Dosage unclear\n"
+            "- Frequency not specified\n"
+            "- Interaction concern\n"
+            "- Patient allergy question",
+            ""
+        )
+        return reason, ok
 
     def save_and_continue(self):
         """Save edited prescription and route based on drug-gene conflicts"""

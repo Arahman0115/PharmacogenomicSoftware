@@ -1,10 +1,10 @@
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
-    QDateEdit, QPushButton, QTreeWidget, QTreeWidgetItem
+    QPushButton, QTreeWidget, QTreeWidgetItem
 )
-from PyQt6.QtCore import pyqtSignal, QDate
+from PyQt6.QtCore import pyqtSignal
 from config import Theme
-from datetime import datetime
+from .optional_date_edit import OptionalDateEdit
 
 
 class PatientSearchWidget(QWidget):
@@ -52,9 +52,7 @@ class PatientSearchWidget(QWidget):
 
         # Date of Birth
         dob_label = QLabel("Date of Birth")
-        self.dob_edit = QDateEdit()
-        self.dob_edit.setCalendarPopup(True)
-        self.dob_edit.setDate(QDate.currentDate())
+        self.dob_edit = OptionalDateEdit()
         form_layout.addWidget(dob_label)
         form_layout.addWidget(self.dob_edit)
 
@@ -85,7 +83,7 @@ class PatientSearchWidget(QWidget):
 
         last_name = self.last_name_edit.text().strip()
         first_name = self.first_name_edit.text().strip()
-        dob = self.dob_edit.date().toString("yyyy-MM-dd")
+        dob = self.dob_edit.get_date_string()
 
         # Build query
         query = "SELECT * FROM patientsinfo"
@@ -99,6 +97,10 @@ class PatientSearchWidget(QWidget):
         if last_name and len(last_name) >= 3:
             conditions.append("last_name LIKE %s")
             params.append(f"{last_name}%")
+
+        if dob:
+            conditions.append("DATE(Dateofbirth) = %s")
+            params.append(dob)
 
         if conditions:
             query += " WHERE " + " AND ".join(conditions)
@@ -142,5 +144,6 @@ class PatientSearchWidget(QWidget):
         """Clear search fields and results"""
         self.last_name_edit.clear()
         self.first_name_edit.clear()
+        self.dob_edit.clear_date()
         self.results_tree.clear()
         self.selected_patient = None

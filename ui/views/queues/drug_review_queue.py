@@ -185,9 +185,15 @@ class DrugReviewApprovalDialog(QDialog):
         button_layout = QHBoxLayout()
         button_layout.addStretch()
 
+        # Cancel prescription button
+        cancel_prescription_btn = QPushButton("Cancel Prescription")
+        cancel_prescription_btn.setProperty("cssClass", "danger")
+        cancel_prescription_btn.clicked.connect(self.cancel_prescription)
+        button_layout.addWidget(cancel_prescription_btn)
+
         # Reject button
         reject_btn = QPushButton("Reject / Contact Prescriber")
-        reject_btn.setProperty("cssClass", "danger")
+        reject_btn.setProperty("cssClass", "warning")
         reject_btn.clicked.connect(self.reject_prescription)
         button_layout.addWidget(reject_btn)
 
@@ -197,13 +203,97 @@ class DrugReviewApprovalDialog(QDialog):
         approve_btn.clicked.connect(self.approve_prescription)
         button_layout.addWidget(approve_btn)
 
-        # Cancel
-        cancel_btn = QPushButton("Cancel")
-        cancel_btn.setProperty("cssClass", "ghost")
-        cancel_btn.clicked.connect(self.reject)
-        button_layout.addWidget(cancel_btn)
+        # Close
+        close_btn = QPushButton("Close")
+        close_btn.setProperty("cssClass", "ghost")
+        close_btn.clicked.connect(self.reject)
+        button_layout.addWidget(close_btn)
 
         layout.addLayout(button_layout)
+
+    def cancel_prescription(self):
+        """Cancel the prescription and move to patient history"""
+        if QMessageBox.question(
+            self, "Cancel Prescription",
+            "Are you sure you want to cancel this prescription?\n\nIt will be moved to the patient's prescription history.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        ) == QMessageBox.StandardButton.Yes:
+            self._move_to_patient_history()
+
+    def _move_to_patient_history(self):
+        """Move prescription from ActivatedPrescriptions to Prescriptions table"""
+        try:
+            cursor = self.db_connection.cursor
+            prescription_id = self.rx_data.get('prescription_id')
+            user_id = self.rx_data.get('user_id')
+            medication_id = self.rx_data.get('medication_id')
+
+            # Get current prescription details
+            cursor.execute(
+                """SELECT quantity_dispensed FROM ActivatedPrescriptions WHERE prescription_id = %s""",
+                (prescription_id,)
+            )
+            ap_data = cursor.fetchone()
+            if not ap_data:
+                raise Exception("Prescription not found in ActivatedPrescriptions")
+
+            # Move to Prescriptions table (patient history)
+            insert_query = """
+                INSERT INTO Prescriptions
+                (user_id, medication_id, quantity_dispensed, refills_remaining,
+                 instructions, status, rx_store_num, fill_date, last_fill_date)
+                VALUES (%s, %s, %s, 1, '', 'cancelled_not_dispensed', '', NOW(), NOW())
+            """
+
+            cursor.execute(insert_query, (
+                user_id,
+                medication_id,
+                ap_data.get('quantity_dispensed', 0)
+            ))
+
+            # Restore bottle quantity if it was allocated
+            cursor.execute(
+                "SELECT bottle_id, quantity_used FROM inusebottles WHERE prescription_id = %s",
+                (prescription_id,)
+            )
+            bottle_allocation = cursor.fetchone()
+
+            if bottle_allocation:
+                cursor.execute(
+                    "UPDATE bottles SET quantity = quantity + %s WHERE bottle_id = %s",
+                    (bottle_allocation.get('quantity_used', 0), bottle_allocation.get('bottle_id'))
+                )
+
+            # Delete from inusebottles (if bottle was allocated)
+            cursor.execute(
+                "DELETE FROM inusebottles WHERE prescription_id = %s",
+                (prescription_id,)
+            )
+
+            # Delete from ActivatedPrescriptions
+            cursor.execute(
+                "DELETE FROM ActivatedPrescriptions WHERE prescription_id = %s",
+                (prescription_id,)
+            )
+
+            # Delete from ProductSelectionQueue if still there
+            cursor.execute(
+                "DELETE FROM ProductSelectionQueue WHERE user_id = %s AND status IN ('pending', 'in_progress') LIMIT 1",
+                (user_id,)
+            )
+
+            self.db_connection.connection.commit()
+
+            QMessageBox.information(
+                self, "Success",
+                f"Prescription cancelled and moved to patient history."
+            )
+
+            self.reject()
+
+        except Exception as e:
+            self.db_connection.connection.rollback()
+            QMessageBox.critical(self, "Error", f"Failed to cancel prescription: {e}")
 
     def approve_prescription(self):
         """Approve the drug review and move to product dispensing"""

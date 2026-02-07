@@ -3,6 +3,7 @@ from PyQt6.QtWidgets import (
     QSpinBox, QPushButton, QMessageBox, QDateEdit, QComboBox
 )
 from PyQt6.QtCore import Qt, QDate
+from services.contact_service import ContactService
 
 
 class PrescriptionsTab(QWidget):
@@ -126,7 +127,7 @@ class PrescriptionsTab(QWidget):
                     p.refills_remaining,
                     p.quantity_dispensed,
                     p.last_fill_date,
-                    pr.prescriber_name,
+                    CONCAT(pr.last_name, ', ', pr.first_name) as prescriber_name,
                     p.status,
                     p.instructions,
                     'historical' as source
@@ -142,12 +143,13 @@ class PrescriptionsTab(QWidget):
                     0 as refills_remaining,
                     ap.quantity_dispensed,
                     ap.fill_date as last_fill_date,
-                    NULL as prescriber_name,
+                    CONCAT(pr.last_name, ', ', pr.first_name) as prescriber_name,
                     ap.status,
                     '' as instructions,
                     'active' as source
                 FROM ActivatedPrescriptions ap
                 LEFT JOIN medications m ON ap.medication_id = m.medication_id
+                LEFT JOIN Prescribers pr ON ap.prescriber_id = pr.prescriber_id
                 WHERE ap.user_id = %s
                 ORDER BY last_fill_date DESC
             """
@@ -240,7 +242,8 @@ class PrescriptionsTab(QWidget):
             return
 
         if self.refills_remaining.value() <= 0:
-            QMessageBox.warning(self, "Error", "No refills remaining for this prescription")
+            # Create a contact request to prescriber for refill authorization
+            self.create_refill_contact_request()
             return
 
         if not self.db_connection:
@@ -317,6 +320,62 @@ class PrescriptionsTab(QWidget):
         except Exception as e:
             self.db_connection.connection.rollback()
             QMessageBox.critical(self, "Error", f"Failed to process refill: {e}")
+
+    def create_refill_contact_request(self):
+        """Create a contact request when prescription has no refills"""
+        if not self.current_prescription or not self.db_connection:
+            return
+
+        try:
+            contact_service = ContactService(self.db_connection)
+            prescription_id = self.current_prescription.get('prescription_id')
+            med_name = self.current_prescription.get('medication_name', '')
+
+            # Get prescriber_id from Prescriptions table
+            cursor = self.db_connection.cursor
+            cursor.execute(
+                "SELECT prescriber_id, medication_id FROM Prescriptions WHERE prescription_id = %s",
+                (prescription_id,)
+            )
+            rx_data = cursor.fetchone()
+
+            if not rx_data or not rx_data.get('prescriber_id'):
+                QMessageBox.warning(
+                    self, "Cannot Create Request",
+                    "Prescriber information is not available for this prescription."
+                )
+                return
+
+            # Check if request already exists
+            if contact_service.check_existing_request(self.user_id, 'refill', prescription_id):
+                QMessageBox.information(
+                    self, "Request Exists",
+                    f"A refill request for {med_name} has already been created and is pending."
+                )
+                return
+
+            # Create the refill request
+            success = contact_service.create_refill_request(
+                user_id=self.user_id,
+                prescriber_id=rx_data.get('prescriber_id'),
+                medication_id=rx_data.get('medication_id'),
+                prescription_id=prescription_id,
+                reason=f"Refill request for {med_name}"
+            )
+
+            if success:
+                QMessageBox.information(
+                    self, "Request Created",
+                    f"Refill request created for {med_name}.\n\n"
+                    "The prescriber will be contacted to authorize additional refills.\n"
+                    "You can track this request in the Contact Queue."
+                )
+                self.clear_form()
+            else:
+                QMessageBox.critical(self, "Error", "Failed to create refill request")
+
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Error creating refill request: {e}")
 
     def clear_form(self):
         """Clear the refill form"""

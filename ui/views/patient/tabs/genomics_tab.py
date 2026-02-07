@@ -1,9 +1,11 @@
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QGroupBox, QTreeWidget, QTreeWidgetItem,
-    QFormLayout, QLineEdit, QPushButton, QMessageBox, QHBoxLayout, QLabel
+    QFormLayout, QLineEdit, QPushButton, QMessageBox, QHBoxLayout, QLabel, QDialog
 )
 from PyQt6.QtCore import Qt
 from services.pharmgkb_service import PharmGKBService
+from services.contact_service import ContactService
+from ui.components.vcf_upload_dialog import VCFUploadDialog
 
 
 class GenomicsTab(QWidget):
@@ -41,8 +43,13 @@ class GenomicsTab(QWidget):
         # Buttons layout
         button_layout = QHBoxLayout()
 
+        upload_vcf_btn = QPushButton("Upload VCF File")
+        upload_vcf_btn.setProperty("cssClass", "primary")
+        upload_vcf_btn.clicked.connect(self.upload_vcf_file)
+        button_layout.addWidget(upload_vcf_btn)
+
         test_btn = QPushButton("Test & Analyze")
-        test_btn.setProperty("cssClass", "primary")
+        test_btn.setProperty("cssClass", "secondary")
         test_btn.clicked.connect(self.test_variant)
         button_layout.addWidget(test_btn)
 
@@ -50,6 +57,11 @@ class GenomicsTab(QWidget):
         add_btn.setProperty("cssClass", "success")
         add_btn.clicked.connect(self.add_variant)
         button_layout.addWidget(add_btn)
+
+        request_genetic_btn = QPushButton("Request Genetic Info")
+        request_genetic_btn.setProperty("cssClass", "warning")
+        request_genetic_btn.clicked.connect(self.request_genetic_information)
+        button_layout.addWidget(request_genetic_btn)
 
         form_layout.addRow("", button_layout)
         add_variant_group.setLayout(form_layout)
@@ -79,6 +91,18 @@ class GenomicsTab(QWidget):
         )
         info_label.setProperty("cssClass", "info-label")
         layout.addWidget(info_label)
+
+    def upload_vcf_file(self):
+        """Open VCF upload dialog"""
+        if not self.db_connection or not self.user_id:
+            QMessageBox.critical(self, "Error", "No database connection or patient selected")
+            return
+
+        dialog = VCFUploadDialog(self.db_connection, self.user_id, self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            # Reload genomic data after successful import
+            self.load_genomic_data()
+            QMessageBox.information(self, "Success", "VCF data imported successfully!")
 
     def test_variant(self):
         """Test variant against PharmGKB without saving"""
@@ -172,6 +196,44 @@ class GenomicsTab(QWidget):
 
         # Reload data
         self.load_genomic_data()
+
+    def request_genetic_information(self):
+        """Create a contact request to get genetic information from prescriber"""
+        if not self.db_connection or not self.user_id:
+            QMessageBox.critical(self, "Error", "No database connection or patient selected")
+            return
+
+        try:
+            contact_service = ContactService(self.db_connection)
+
+            # Check if request already exists
+            if contact_service.check_existing_request(self.user_id, 'genetic_info'):
+                QMessageBox.information(
+                    self, "Request Exists",
+                    "A genetic information request has already been created and is pending.\n"
+                    "You can track this in the Contact Queue."
+                )
+                return
+
+            # Create the genetic info request
+            success = contact_service.create_genetic_info_request(
+                user_id=self.user_id,
+                reason="Genetic testing results needed for pharmacogenomic medication optimization"
+            )
+
+            if success:
+                QMessageBox.information(
+                    self, "Request Created",
+                    "Genetic information request has been created.\n\n"
+                    "The patient's prescribers will be contacted to provide any available "
+                    "genetic testing results or family history information.\n\n"
+                    "You can track this request in the Contact Queue."
+                )
+            else:
+                QMessageBox.critical(self, "Error", "Failed to create genetic information request")
+
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Error creating request: {e}")
 
     def load_genomic_data(self):
         """Load genetic test results from database with drug conflicts"""
