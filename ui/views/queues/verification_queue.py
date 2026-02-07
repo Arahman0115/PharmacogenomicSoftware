@@ -86,6 +86,38 @@ class VerificationQueueView(BaseQueueView):
             if dialog.exec() == QDialog.DialogCode.Accepted:
                 self.load_data()
 
+    def open_prescription_modal(self, prescription_id: int):
+        """Open prescription modal for a specific prescription ID (from search)"""
+        try:
+            # Query ActivatedPrescriptions to get prescription data by ID
+            query = """
+                SELECT
+                    ap.prescription_id,
+                    ap.user_id,
+                    CONCAT(pi.last_name, ', ', pi.first_name) as patient_name,
+                    m.medication_name,
+                    ap.quantity_dispensed,
+                    ap.status
+                FROM ActivatedPrescriptions ap
+                JOIN patientsinfo pi ON ap.user_id = pi.user_id
+                LEFT JOIN medications m ON ap.medication_id = m.medication_id
+                WHERE ap.prescription_id = %s
+            """
+            self.db_connection.cursor.execute(query, (prescription_id,))
+            rx_data = self.db_connection.cursor.fetchone()
+
+            if rx_data:
+                from PyQt6.QtWidgets import QMessageBox
+                dialog = VerificationDialog(self.db_connection, rx_data, self)
+                if dialog.exec() == QDialog.DialogCode.Accepted:
+                    self.load_data()
+            else:
+                from PyQt6.QtWidgets import QMessageBox
+                QMessageBox.warning(self, "Not Found", f"Prescription {prescription_id} not found")
+        except Exception as e:
+            from PyQt6.QtWidgets import QMessageBox
+            QMessageBox.critical(self, "Error", f"Failed to open prescription: {e}")
+
 
 class VerificationDialog(QDialog):
     """Dialog for pharmacist verification of prescription before release"""

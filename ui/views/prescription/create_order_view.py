@@ -1,6 +1,6 @@
 from PyQt6.QtWidgets import (
     QMainWindow, QVBoxLayout, QHBoxLayout, QWidget, QMessageBox, QRadioButton,
-    QButtonGroup, QPushButton, QGroupBox, QFrame
+    QButtonGroup, QPushButton, QGroupBox, QFrame, QStackedWidget
 )
 from PyQt6.QtCore import Qt
 from ui.components import PatientSearchWidget, PrescriptionTable
@@ -36,27 +36,25 @@ class CreateOrderView(QMainWindow):
         self.patient_search.patient_selected.connect(self.on_patient_selected)
         layout.addWidget(self.patient_search, 1)
 
-        # New Prescription section (hidden by default)
-        self.new_rx_section = NewPrescriptionSection(db_connection=self.db_connection)
-        layout.addWidget(self.new_rx_section, 2)
-        self.new_rx_section.hide()
+        # Stacked widget to hold the two modes
+        self.stacked_modes = QStackedWidget()
 
-        # Refill section (shown by default)
+        # === Page 0: Refill Mode ===
+        refill_page = QWidget()
+        refill_layout = QVBoxLayout(refill_page)
+
         self.refill_section = RefillSection(db_connection=self.db_connection)
-        layout.addWidget(self.refill_section, 1)
+        refill_layout.addWidget(self.refill_section, 1)
 
-        # Order options (shown for refill only)
         self.order_options = OrderOptionsSection()
-        layout.addWidget(self.order_options, 1)
         self.order_options_group = QGroupBox()
         order_opt_layout = QVBoxLayout(self.order_options_group)
         order_opt_layout.addWidget(self.order_options)
-        layout.addWidget(self.order_options_group, 1)
+        refill_layout.addWidget(self.order_options_group, 1)
 
-        # Order summary (shown for refill only)
         self.order_summary = OrderSummarySection()
         self.order_summary.order_submitted.connect(self.submit_refill_order)
-        layout.addWidget(self.order_summary, 1)
+        refill_layout.addWidget(self.order_summary, 1)
 
         # Create Order button (refill mode)
         refill_btn_layout = QHBoxLayout()
@@ -64,11 +62,20 @@ class CreateOrderView(QMainWindow):
         self.create_refill_order_btn = QPushButton("Create Refill Order")
         self.create_refill_order_btn.setProperty("cssClass", "success")
         self.create_refill_order_btn.clicked.connect(self.submit_refill_order)
-        self.create_refill_order_btn.hide()
         refill_btn_layout.addWidget(self.create_refill_order_btn)
         self.refill_btn_frame = QFrame()
         self.refill_btn_frame.setLayout(refill_btn_layout)
-        layout.addWidget(self.refill_btn_frame)
+        refill_layout.addWidget(self.refill_btn_frame)
+
+        refill_layout.addStretch()
+        self.stacked_modes.addWidget(refill_page)
+
+        # === Page 1: New Prescription Mode ===
+        new_rx_page = QWidget()
+        new_rx_layout = QVBoxLayout(new_rx_page)
+
+        self.new_rx_section = NewPrescriptionSection(db_connection=self.db_connection)
+        new_rx_layout.addWidget(self.new_rx_section, 2)
 
         # Create New Prescription button (new rx mode)
         new_rx_btn_layout = QHBoxLayout()
@@ -79,8 +86,13 @@ class CreateOrderView(QMainWindow):
         new_rx_btn_layout.addWidget(self.create_new_rx_btn)
         self.new_rx_btn_frame = QFrame()
         self.new_rx_btn_frame.setLayout(new_rx_btn_layout)
-        layout.addWidget(self.new_rx_btn_frame)
-        self.new_rx_btn_frame.hide()
+        new_rx_layout.addWidget(self.new_rx_btn_frame)
+
+        new_rx_layout.addStretch()
+        self.stacked_modes.addWidget(new_rx_page)
+
+        # Add stacked widget to main layout
+        layout.addWidget(self.stacked_modes, 2)
 
         self.setCentralWidget(central_widget)
 
@@ -110,14 +122,8 @@ class CreateOrderView(QMainWindow):
         """Toggle between New Prescription and Refill modes"""
         is_new = self.new_rx_radio.isChecked()
 
-        # Show/hide sections
-        self.new_rx_section.setVisible(is_new)
-        self.new_rx_btn_frame.setVisible(is_new)
-        self.refill_section.setVisible(not is_new)
-        self.order_options_group.setVisible(not is_new)
-        self.order_summary.setVisible(not is_new)
-        self.refill_btn_frame.setVisible(not is_new)
-        self.create_refill_order_btn.setVisible(not is_new)
+        # Switch stacked widget pages (0=Refill, 1=New Rx)
+        self.stacked_modes.setCurrentIndex(1 if is_new else 0)
 
         if is_new:
             self.new_rx_section.clear()
@@ -171,7 +177,7 @@ class CreateOrderView(QMainWindow):
             ap_data = (
                 patient_id,
                 medication_id,
-                None,  # prescriber_id (can add later)
+                rx_data['prescriber_id'],
                 rx_data['quantity'],
                 patient['first_name'],
                 patient['last_name'],

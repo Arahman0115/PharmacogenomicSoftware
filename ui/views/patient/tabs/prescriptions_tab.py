@@ -3,6 +3,7 @@ from PyQt6.QtWidgets import (
     QSpinBox, QPushButton, QMessageBox, QDateEdit, QComboBox
 )
 from PyQt6.QtCore import Qt, QDate
+from services.contact_service import ContactService
 
 
 class PrescriptionsTab(QWidget):
@@ -16,6 +17,22 @@ class PrescriptionsTab(QWidget):
         self.init_ui()
         if user_id:
             self.load_prescriptions_data()
+
+    def _format_status(self, status):
+        """Format status string for display"""
+        status_map = {
+            'data_entry_pending': 'Data Entry Pending',
+            'data_entry_complete': 'Data Entry Complete',
+            'product_dispensing_pending': 'Awaiting Bottle Selection',
+            'bottle_selected': 'Bottle Selected',
+            'verification_pending': 'In Verification',
+            'released_to_pickup': 'Ready for Pickup',
+            'completed': 'Completed',
+            'cancelled_not_dispensed': 'Cancelled',
+            'rejected': 'Rejected',
+            'drug_review_pending': 'Drug Review Pending',
+        }
+        return status_map.get(status, status)
 
     def init_ui(self):
         """Initialize the tab UI"""
@@ -97,7 +114,7 @@ class PrescriptionsTab(QWidget):
         layout.addWidget(form_group, 1)
 
     def load_prescriptions_data(self):
-        """Load patient prescriptions from database"""
+        """Load patient prescriptions from database - both historical and active"""
         if not self.db_connection or not self.user_id:
             return
 
@@ -110,16 +127,33 @@ class PrescriptionsTab(QWidget):
                     p.refills_remaining,
                     p.quantity_dispensed,
                     p.last_fill_date,
-                    pr.prescriber_name,
+                    CONCAT(pr.last_name, ', ', pr.first_name) as prescriber_name,
                     p.status,
-                    p.instructions
+                    p.instructions,
+                    'historical' as source
                 FROM Prescriptions p
                 LEFT JOIN medications m ON p.medication_id = m.medication_id
                 LEFT JOIN Prescribers pr ON p.prescriber_id = pr.prescriber_id
                 WHERE p.user_id = %s
-                ORDER BY p.last_fill_date DESC
+                UNION ALL
+                SELECT
+                    ap.prescription_id,
+                    ap.rx_store_num,
+                    m.medication_name,
+                    0 as refills_remaining,
+                    ap.quantity_dispensed,
+                    ap.fill_date as last_fill_date,
+                    CONCAT(pr.last_name, ', ', pr.first_name) as prescriber_name,
+                    ap.status,
+                    '' as instructions,
+                    'active' as source
+                FROM ActivatedPrescriptions ap
+                LEFT JOIN medications m ON ap.medication_id = m.medication_id
+                LEFT JOIN Prescribers pr ON ap.prescriber_id = pr.prescriber_id
+                WHERE ap.user_id = %s
+                ORDER BY last_fill_date DESC
             """
-            self.db_connection.cursor.execute(query, (self.user_id,))
+            self.db_connection.cursor.execute(query, (self.user_id, self.user_id))
             results = self.db_connection.cursor.fetchall()
 
             self.table.setRowCount(0)
@@ -163,12 +197,34 @@ class PrescriptionsTab(QWidget):
         if not self.current_prescription:
             return
 
+        # Check if this is an active prescription (still in workflow)
+        is_active = self.current_prescription.get('source') == 'active'
+
         # Populate form
         self.med_name.setText(self.current_prescription.get('medication_name', ''))
-        self.prescriber_name.setText(self.current_prescription.get('prescriber_name', ''))
+        self.prescriber_name.setText(self.current_prescription.get('prescriber_name', '') or '')
         self.refills_remaining.setValue(self.current_prescription.get('refills_remaining', 0))
         self.instructions.setText(self.current_prescription.get('instructions', ''))
         self.refill_qty.setValue(self.current_prescription.get('quantity_dispensed', 30))
+
+        # Disable refill form for active prescriptions (still in workflow)
+        self.med_name.setReadOnly(True)
+        self.prescriber_name.setReadOnly(True)
+        self.refills_remaining.setReadOnly(True)
+        self.instructions.setReadOnly(True)
+        self.refill_qty.setEnabled(not is_active)
+        self.delivery_method.setEnabled(not is_active)
+        self.promise_date.setEnabled(not is_active)
+
+        # Show message if prescription is active
+        if is_active:
+            status = self.current_prescription.get('status', 'Unknown')
+            status_display = self._format_status(status)
+            QMessageBox.information(
+                self, "Prescription In Workflow",
+                f"This prescription is currently in the workflow ({status_display}).\n"
+                f"Refills are not available until the prescription is completed."
+            )
 
     def process_refill(self):
         """Process refill and add to ProductSelectionQueue"""
@@ -176,8 +232,18 @@ class PrescriptionsTab(QWidget):
             QMessageBox.warning(self, "Error", "Please select a prescription to refill")
             return
 
+        # Check if prescription is active (in workflow)
+        if self.current_prescription.get('source') == 'active':
+            QMessageBox.warning(
+                self, "Cannot Refill",
+                "This prescription is currently in the workflow and cannot be refilled.\n"
+                "Please wait until the prescription is completed."
+            )
+            return
+
         if self.refills_remaining.value() <= 0:
-            QMessageBox.warning(self, "Error", "No refills remaining for this prescription")
+            # Create a contact request to prescriber for refill authorization
+            self.create_refill_contact_request()
             return
 
         if not self.db_connection:
@@ -254,6 +320,62 @@ class PrescriptionsTab(QWidget):
         except Exception as e:
             self.db_connection.connection.rollback()
             QMessageBox.critical(self, "Error", f"Failed to process refill: {e}")
+
+    def create_refill_contact_request(self):
+        """Create a contact request when prescription has no refills"""
+        if not self.current_prescription or not self.db_connection:
+            return
+
+        try:
+            contact_service = ContactService(self.db_connection)
+            prescription_id = self.current_prescription.get('prescription_id')
+            med_name = self.current_prescription.get('medication_name', '')
+
+            # Get prescriber_id from Prescriptions table
+            cursor = self.db_connection.cursor
+            cursor.execute(
+                "SELECT prescriber_id, medication_id FROM Prescriptions WHERE prescription_id = %s",
+                (prescription_id,)
+            )
+            rx_data = cursor.fetchone()
+
+            if not rx_data or not rx_data.get('prescriber_id'):
+                QMessageBox.warning(
+                    self, "Cannot Create Request",
+                    "Prescriber information is not available for this prescription."
+                )
+                return
+
+            # Check if request already exists
+            if contact_service.check_existing_request(self.user_id, 'refill', prescription_id):
+                QMessageBox.information(
+                    self, "Request Exists",
+                    f"A refill request for {med_name} has already been created and is pending."
+                )
+                return
+
+            # Create the refill request
+            success = contact_service.create_refill_request(
+                user_id=self.user_id,
+                prescriber_id=rx_data.get('prescriber_id'),
+                medication_id=rx_data.get('medication_id'),
+                prescription_id=prescription_id,
+                reason=f"Refill request for {med_name}"
+            )
+
+            if success:
+                QMessageBox.information(
+                    self, "Request Created",
+                    f"Refill request created for {med_name}.\n\n"
+                    "The prescriber will be contacted to authorize additional refills.\n"
+                    "You can track this request in the Contact Queue."
+                )
+                self.clear_form()
+            else:
+                QMessageBox.critical(self, "Error", "Failed to create refill request")
+
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Error creating refill request: {e}")
 
     def clear_form(self):
         """Clear the refill form"""

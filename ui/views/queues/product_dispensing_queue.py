@@ -130,6 +130,40 @@ class ProductDispensingQueueView(BaseQueueView):
             if dialog.exec() == QDialog.DialogCode.Accepted:
                 self.load_data()
 
+    def open_prescription_modal(self, prescription_id: int):
+        """Open prescription modal for a specific prescription ID (from search)"""
+        try:
+            # Query ActivatedPrescriptions to get prescription data by ID
+            query = """
+                SELECT
+                    ap.prescription_id as rx_id,
+                    ap.user_id,
+                    CONCAT(pi.first_name, ', ', pi.last_name) as patient_name,
+                    m.medication_name,
+                    ap.quantity_dispensed,
+                    ap.status,
+                    ap.medication_id,
+                    ap.rx_number
+                FROM ActivatedPrescriptions ap
+                JOIN patientsinfo pi ON ap.user_id = pi.user_id
+                LEFT JOIN medications m ON ap.medication_id = m.medication_id
+                WHERE ap.prescription_id = %s
+            """
+            self.db_connection.cursor.execute(query, (prescription_id,))
+            rx_data = self.db_connection.cursor.fetchone()
+
+            if rx_data:
+                from PyQt6.QtWidgets import QMessageBox
+                dialog = BottleSelectionDialog(self.db_connection, rx_data, self)
+                if dialog.exec() == QDialog.DialogCode.Accepted:
+                    self.load_data()
+            else:
+                from PyQt6.QtWidgets import QMessageBox
+                QMessageBox.warning(self, "Not Found", f"Prescription {prescription_id} not found")
+        except Exception as e:
+            from PyQt6.QtWidgets import QMessageBox
+            QMessageBox.critical(self, "Error", f"Failed to open prescription: {e}")
+
 
 class BottleSelectionDialog(QDialog):
     """Dialog for selecting a bottle from available stock"""
@@ -184,17 +218,108 @@ class BottleSelectionDialog(QDialog):
         button_layout = QHBoxLayout()
         button_layout.addStretch()
 
+        cancel_prescription_btn = QPushButton("Cancel Prescription")
+        cancel_prescription_btn.setProperty("cssClass", "danger")
+        cancel_prescription_btn.clicked.connect(self.cancel_prescription)
+        button_layout.addWidget(cancel_prescription_btn)
+
         select_btn = QPushButton("Select Bottle")
         select_btn.setProperty("cssClass", "success")
         select_btn.clicked.connect(self.select_bottle)
         button_layout.addWidget(select_btn)
 
-        cancel_btn = QPushButton("Cancel")
-        cancel_btn.setProperty("cssClass", "ghost")
-        cancel_btn.clicked.connect(self.reject)
-        button_layout.addWidget(cancel_btn)
+        close_btn = QPushButton("Close")
+        close_btn.setProperty("cssClass", "ghost")
+        close_btn.clicked.connect(self.reject)
+        button_layout.addWidget(close_btn)
 
         layout.addLayout(button_layout)
+
+    def cancel_prescription(self):
+        """Cancel the prescription and move to patient history"""
+        from PyQt6.QtWidgets import QMessageBox
+        if QMessageBox.question(
+            self, "Cancel Prescription",
+            "Are you sure you want to cancel this prescription?\n\nIt will be moved to the patient's prescription history.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        ) == QMessageBox.StandardButton.Yes:
+            self._move_to_patient_history()
+
+    def _move_to_patient_history(self):
+        """Move prescription from ActivatedPrescriptions to Prescriptions table"""
+        try:
+            from PyQt6.QtWidgets import QMessageBox
+            cursor = self.db_connection.cursor
+            prescription_id = self.rx_id
+            user_id = self.user_id
+            medication_id = self.medication_id
+
+            # Get current prescription details
+            cursor.execute(
+                """SELECT quantity_dispensed FROM ActivatedPrescriptions WHERE prescription_id = %s""",
+                (prescription_id,)
+            )
+            ap_data = cursor.fetchone()
+            if not ap_data:
+                raise Exception("Prescription not found in ActivatedPrescriptions")
+
+            # Move to Prescriptions table (patient history)
+            insert_query = """
+                INSERT INTO Prescriptions
+                (user_id, medication_id, quantity_dispensed, refills_remaining,
+                 instructions, status, rx_store_num, fill_date, last_fill_date)
+                VALUES (%s, %s, %s, 1, '', 'cancelled_not_dispensed', '', NOW(), NOW())
+            """
+
+            cursor.execute(insert_query, (
+                user_id,
+                medication_id,
+                ap_data.get('quantity_dispensed', 0)
+            ))
+
+            # Restore bottle quantity if it was allocated
+            cursor.execute(
+                "SELECT bottle_id, quantity_used FROM inusebottles WHERE prescription_id = %s",
+                (prescription_id,)
+            )
+            bottle_allocation = cursor.fetchone()
+
+            if bottle_allocation:
+                cursor.execute(
+                    "UPDATE bottles SET quantity = quantity + %s WHERE bottle_id = %s",
+                    (bottle_allocation.get('quantity_used', 0), bottle_allocation.get('bottle_id'))
+                )
+
+            # Delete from inusebottles (if bottle was allocated)
+            cursor.execute(
+                "DELETE FROM inusebottles WHERE prescription_id = %s",
+                (prescription_id,)
+            )
+
+            # Delete from ActivatedPrescriptions
+            cursor.execute(
+                "DELETE FROM ActivatedPrescriptions WHERE prescription_id = %s",
+                (prescription_id,)
+            )
+
+            # Delete from ProductSelectionQueue if still there
+            cursor.execute(
+                "DELETE FROM ProductSelectionQueue WHERE user_id = %s AND status IN ('pending', 'in_progress') LIMIT 1",
+                (user_id,)
+            )
+
+            self.db_connection.connection.commit()
+
+            QMessageBox.information(
+                self, "Success",
+                f"Prescription cancelled and moved to patient history."
+            )
+
+            self.reject()
+
+        except Exception as e:
+            self.db_connection.connection.rollback()
+            QMessageBox.critical(self, "Error", f"Failed to cancel prescription: {e}")
 
     def load_bottles(self):
         """Load available bottles matching the medication"""

@@ -518,9 +518,9 @@ class PrescriberSearchDialog(QDialog):
 
         try:
             query = """
-                SELECT prescriber_id, prescriber_name, npi
+                SELECT prescriber_id, CONCAT(last_name, ', ', first_name) as prescriber_name, npi
                 FROM Prescribers
-                WHERE prescriber_name LIKE %s
+                WHERE CONCAT(last_name, ', ', first_name) LIKE %s
             """
             self.db_connection.cursor.execute(query, (f"%{prescriber_name}%",))
             results = self.db_connection.cursor.fetchall()

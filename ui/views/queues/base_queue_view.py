@@ -1,6 +1,6 @@
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QTableWidget,
-    QTableWidgetItem, QFrame, QHeaderView
+    QTableWidgetItem, QFrame, QHeaderView, QLabel
 )
 from PyQt6.QtCore import Qt
 from config import Theme
@@ -49,6 +49,16 @@ class BaseQueueView(QWidget):
             Theme.MARGIN_NORMAL, Theme.MARGIN_NORMAL
         )
         layout.setSpacing(Theme.SPACING_NORMAL)
+
+        # Queue title label
+        title_label = QLabel(self.WINDOW_TITLE)
+        title_label.setStyleSheet(f"""
+            color: {Theme.TEXT_PRIMARY};
+            font-size: 18px;
+            font-weight: bold;
+            padding: 6px 0px;
+        """)
+        layout.addWidget(title_label)
 
         # Filter section - uses cssClass property for global theme
         self.filter_frame = QFrame()

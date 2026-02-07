@@ -15,7 +15,7 @@ class PrescriptionService:
         """Load prescription with patient and prescriber info"""
         try:
             query = """
-                SELECT p.*, m.medication_name, pr.prescriber_name
+                SELECT p.*, m.medication_name, CONCAT(pr.last_name, ', ', pr.first_name) as prescriber_name
                 FROM Prescriptions p
                 LEFT JOIN medications m ON p.medication_id = m.medication_id
                 LEFT JOIN Prescribers pr ON p.prescriber_id = pr.prescriber_id
