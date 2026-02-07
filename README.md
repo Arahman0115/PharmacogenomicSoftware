@@ -1,7 +1,7 @@
 # Pharmacogenomic Software
 
 Pharmacogenomic Software is designed to integrate pharmacogenomics (PGX) into patient pharmacy healthcare systems, enabling personalized medicine and safer, more effective drug therapy. This platform empowers clinicians and pharmacists to make informed decisions by leveraging genetic data alongside traditional patient information.
-.
+
 ## Inspirations
 The project is inspired by the growing need to bridge the gap between genetic research and practical healthcare. By incorporating PGX data, the software aims to reduce adverse drug reactions, optimize dosing, and improve patient outcomes. It draws from real-world pharmacy workflows, clinical decision support systems, and the latest advances in pharmacogenomics.
 
