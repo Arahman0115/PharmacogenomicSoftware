@@ -17,6 +17,22 @@ class PrescriptionsTab(QWidget):
         if user_id:
             self.load_prescriptions_data()
 
+    def _format_status(self, status):
+        """Format status string for display"""
+        status_map = {
+            'data_entry_pending': 'Data Entry Pending',
+            'data_entry_complete': 'Data Entry Complete',
+            'product_dispensing_pending': 'Awaiting Bottle Selection',
+            'bottle_selected': 'Bottle Selected',
+            'verification_pending': 'In Verification',
+            'released_to_pickup': 'Ready for Pickup',
+            'completed': 'Completed',
+            'cancelled_not_dispensed': 'Cancelled',
+            'rejected': 'Rejected',
+            'drug_review_pending': 'Drug Review Pending',
+        }
+        return status_map.get(status, status)
+
     def init_ui(self):
         """Initialize the tab UI"""
         layout = QHBoxLayout(self)
@@ -97,7 +113,7 @@ class PrescriptionsTab(QWidget):
         layout.addWidget(form_group, 1)
 
     def load_prescriptions_data(self):
-        """Load patient prescriptions from database"""
+        """Load patient prescriptions from database - both historical and active"""
         if not self.db_connection or not self.user_id:
             return
 
@@ -112,14 +128,30 @@ class PrescriptionsTab(QWidget):
                     p.last_fill_date,
                     pr.prescriber_name,
                     p.status,
-                    p.instructions
+                    p.instructions,
+                    'historical' as source
                 FROM Prescriptions p
                 LEFT JOIN medications m ON p.medication_id = m.medication_id
                 LEFT JOIN Prescribers pr ON p.prescriber_id = pr.prescriber_id
                 WHERE p.user_id = %s
-                ORDER BY p.last_fill_date DESC
+                UNION ALL
+                SELECT
+                    ap.prescription_id,
+                    ap.rx_store_num,
+                    m.medication_name,
+                    0 as refills_remaining,
+                    ap.quantity_dispensed,
+                    ap.fill_date as last_fill_date,
+                    NULL as prescriber_name,
+                    ap.status,
+                    '' as instructions,
+                    'active' as source
+                FROM ActivatedPrescriptions ap
+                LEFT JOIN medications m ON ap.medication_id = m.medication_id
+                WHERE ap.user_id = %s
+                ORDER BY last_fill_date DESC
             """
-            self.db_connection.cursor.execute(query, (self.user_id,))
+            self.db_connection.cursor.execute(query, (self.user_id, self.user_id))
             results = self.db_connection.cursor.fetchall()
 
             self.table.setRowCount(0)
@@ -163,17 +195,48 @@ class PrescriptionsTab(QWidget):
         if not self.current_prescription:
             return
 
+        # Check if this is an active prescription (still in workflow)
+        is_active = self.current_prescription.get('source') == 'active'
+
         # Populate form
         self.med_name.setText(self.current_prescription.get('medication_name', ''))
-        self.prescriber_name.setText(self.current_prescription.get('prescriber_name', ''))
+        self.prescriber_name.setText(self.current_prescription.get('prescriber_name', '') or '')
         self.refills_remaining.setValue(self.current_prescription.get('refills_remaining', 0))
         self.instructions.setText(self.current_prescription.get('instructions', ''))
         self.refill_qty.setValue(self.current_prescription.get('quantity_dispensed', 30))
+
+        # Disable refill form for active prescriptions (still in workflow)
+        self.med_name.setReadOnly(True)
+        self.prescriber_name.setReadOnly(True)
+        self.refills_remaining.setReadOnly(True)
+        self.instructions.setReadOnly(True)
+        self.refill_qty.setEnabled(not is_active)
+        self.delivery_method.setEnabled(not is_active)
+        self.promise_date.setEnabled(not is_active)
+
+        # Show message if prescription is active
+        if is_active:
+            status = self.current_prescription.get('status', 'Unknown')
+            status_display = self._format_status(status)
+            QMessageBox.information(
+                self, "Prescription In Workflow",
+                f"This prescription is currently in the workflow ({status_display}).\n"
+                f"Refills are not available until the prescription is completed."
+            )
 
     def process_refill(self):
         """Process refill and add to ProductSelectionQueue"""
         if not self.current_prescription:
             QMessageBox.warning(self, "Error", "Please select a prescription to refill")
+            return
+
+        # Check if prescription is active (in workflow)
+        if self.current_prescription.get('source') == 'active':
+            QMessageBox.warning(
+                self, "Cannot Refill",
+                "This prescription is currently in the workflow and cannot be refilled.\n"
+                "Please wait until the prescription is completed."
+            )
             return
 
         if self.refills_remaining.value() <= 0:

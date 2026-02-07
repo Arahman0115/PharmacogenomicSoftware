@@ -1,4 +1,4 @@
-from PyQt6.QtWidgets import QWidget, QVBoxLayout, QGroupBox, QTableWidget, QTableWidgetItem, QHeaderView
+from PyQt6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QGroupBox, QTableWidget, QTableWidgetItem, QHeaderView, QPushButton
 
 
 class DrugReviewTab(QWidget):
@@ -15,6 +15,17 @@ class DrugReviewTab(QWidget):
     def init_ui(self):
         """Initialize the tab UI"""
         layout = QVBoxLayout(self)
+
+        # Button layout
+        button_layout = QHBoxLayout()
+        button_layout.addStretch()
+
+        refresh_btn = QPushButton("Refresh")
+        refresh_btn.setProperty("cssClass", "secondary")
+        refresh_btn.clicked.connect(self.load_drug_interactions)
+        button_layout.addWidget(refresh_btn)
+
+        layout.addLayout(button_layout)
 
         group = QGroupBox("Drug-Gene Interactions & Warnings")
         group_layout = QVBoxLayout()
